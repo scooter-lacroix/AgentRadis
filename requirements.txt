@@ -6,17 +6,30 @@ loguru~=0.7.3
 numpy
 datasets~=3.2.0
 fastapi~=0.115.11
+tomli~=2.0.1
 
+# UI and API dependencies
+uvicorn~=0.34.0
+aiofiles~=24.1.0
+jinja2~=3.1.2
+python-multipart~=0.0.9
+
+# File handling dependencies
+pydantic_core~=2.27.2
+colorama~=0.4.6
+typing-extensions~=4.9.0
+httpx~=0.26.0
+
+# Web and browser tools
 html2text~=2024.2.26
 gymnasium~=1.0.0
 pillow~=10.4.0
 browsergym~=0.13.3
-uvicorn~=0.34.0
 unidiff~=0.7.5
 browser-use~=0.1.40
 googlesearch-python~=1.3.0
-
-aiofiles~=24.1.0
-pydantic_core~=2.27.2
-colorama~=0.4.6
 playwright~=1.49.1
+
+# For development
+pytest~=7.4.4
+black~=24.4.0

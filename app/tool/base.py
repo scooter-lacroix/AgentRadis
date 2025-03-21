@@ -1,34 +1,63 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from pydantic import BaseModel, Field
 
 
-class BaseTool(ABC, BaseModel):
-    name: str
-    description: str
-    parameters: Optional[dict] = None
+class BaseTool(ABC):
+    """Base class for all tools."""
 
-    class Config:
-        arbitrary_types_allowed = True
+    name: str = ""
+    description: str = ""
+    examples: List[str] = []
+    timeout: float = 30.0
+    is_stateful: bool = False
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
 
-    async def __call__(self, **kwargs) -> Any:
-        """Execute the tool with given parameters."""
-        return await self.execute(**kwargs)
+    def __init__(self, **kwargs):
+        """Initialize the tool, optionally with kwargs for initialization options."""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
 
     @abstractmethod
-    async def execute(self, **kwargs) -> Any:
-        """Execute the tool with given parameters."""
+    async def execute(self, **kwargs):
+        """Execute the tool with the given parameters."""
+        raise NotImplementedError("Tool must implement execute method")
+
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """Execute the tool with the given arguments."""
+        raise NotImplementedError("Tool must implement run method")
+
+    async def cleanup(self):
+        """Clean up any resources used by the tool."""
+        pass
+
+    async def reset(self):
+        """Reset the tool's state if it's stateful."""
+        pass
+
+    async def __call__(self, **kwargs):
+        """Make the tool callable."""
+        return await self.execute(**kwargs)
 
     def to_param(self) -> Dict:
-        """Convert tool to function call format."""
+        """Convert tool to OpenAI function call format."""
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
-            },
+                "parameters": {
+                    "type": "object",
+                    "properties": self.parameters.get("properties", {}),
+                    "required": self.parameters.get("required", [])
+                }
+            }
         }
 
 
@@ -79,4 +108,4 @@ class ToolFailure(ToolResult):
 
 
 class AgentAwareTool:
-    agent: Optional = None
+    agent: Optional[Any] = None
