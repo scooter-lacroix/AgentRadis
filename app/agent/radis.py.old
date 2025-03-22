@@ -1,0 +1,862 @@
+"""
+Radis Agent Module
+
+This module provides the Radis agent, a versatile agent capable of
+handling complex tasks through tool usage and reasoning.
+"""
+
+from typing import Dict, List, Optional, Any
+from app.agent.base import BaseAgent
+from app.schema import AgentState, Message, ToolCall
+from app.tool.base import BaseTool
+from app.logger import logger
+
+# RadisOptimizer class to profile and optimize models
+class ModelOptimizer:
+    def __init__(self):
+        """Initialize the optimizer with default settings"""
+        self.profiles = {}
+        self.current_model = None
+
+    def profile_model(self, model_id: str) -> dict:
+        """Profile a model to identify optimal settings"""
+        import torch
+        import platform
+        try:
+            import psutil
+        except ImportError:
+            # Fallback if psutil is not installed
+            import os
+            import platform
+
+            # Create a basic psutil-like interface
+            class PsutiLFallback:
+                @staticmethod
+                def cpu_count(logical=True):
+                    """Return number of CPUs"""
+                    if platform.system() == "Windows":
+                        return os.cpu_count() or 1
+                    else:
+                        try:
+                            with open('/proc/cpuinfo') as f:
+                                return f.read().count('processor\t:')
+                        except:
+                            return os.cpu_count() or 1
+
+                @staticmethod
+                def virtual_memory():
+                    """Return memory information"""
+                    class MemInfo:
+                        def __init__(self):
+                            self.total = 8 * 1024 * 1024 * 1024  # Default 8GB
+
+                            if platform.system() == "Linux":
+                                try:
+                                    with open('/proc/meminfo') as f:
+                                        for line in f:
+                                            if 'MemTotal' in line:
+                                                self.total = int(line.split()[1]) * 1024
+                                                break
+                                except:
+                                    pass
+                            elif platform.system() == "Darwin":  # macOS
+                                try:
+                                    import subprocess
+                                    result = subprocess.check_output(['sysctl', '-n', 'hw.memsize'])
+                                    self.total = int(result.strip())
+                                except:
+                                    pass
+                    return MemInfo()
+
+            # Use the fallback
+            psutil = PsutiLFallback()
+        from datetime import datetime
+
+        # System information
+        system_info = {
+            "cpu_count": psutil.cpu_count(logical=False),
+            "total_memory_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+            "has_gpu": torch.cuda.is_available(),
+            "os": platform.system()
+        }
+
+        # Get GPU information if available
+        if system_info["has_gpu"]:
+            system_info["gpu_count"] = torch.cuda.device_count()
+            system_info["gpu_names"] = [torch.cuda.get_device_name(i) for i in range(system_info["gpu_count"])]
+            system_info["gpu_memory"] = [round(torch.cuda.get_device_properties(i).total_memory / (1024**3), 2)
+                                        for i in range(system_info["gpu_count"])]
+
+        # Determine optimal settings based on system resources
+        optimal_settings = self._determine_optimal_settings(model_id, system_info)
+
+        # Store profile
+        self.profiles[model_id] = {
+            "system_info": system_info,
+            "settings": optimal_settings,
+            "last_profiled": datetime.now().isoformat()
+        }
+
+        return self.profiles[model_id]
+
+    def _determine_optimal_settings(self, model_id: str, system_info: dict) -> dict:
+        """Determine optimal settings for the model based on available hardware"""
+        settings = {
+            "device": "cpu",
+            "quantization": None,
+            "batch_size": 1,
+            "threads": max(1, system_info["cpu_count"] - 1),
+            "max_context_length": 8192,
+            "use_flash_attention": False,
+            "compile_model": False,
+            "use_better_transformer": False
+        }
+
+        # Large models like Gemma and Llama
+        if any(name in model_id.lower() for name in ["gemma", "llama", "mistral"]):
+            # Model size approximation based on name
+            if "70b" in model_id.lower() or "65b" in model_id.lower():
+                model_size = "70B"
+            elif "33b" in model_id.lower() or "34b" in model_id.lower() or "35b" in model_id.lower():
+                model_size = "35B"
+            elif "27b" in model_id.lower() or "30b" in model_id.lower():
+                model_size = "30B"
+            elif "13b" in model_id.lower() or "14b" in model_id.lower():
+                model_size = "13B"
+            elif "7b" in model_id.lower() or "8b" in model_id.lower():
+                model_size = "7B"
+            else:
+                model_size = "7B"  # Default assumption
+
+            # GPU with sufficient memory
+            if system_info["has_gpu"] and any(mem > 24 for mem in system_info.get("gpu_memory", [0])):
+                settings["device"] = "cuda"
+                settings["quantization"] = "8-bit" if model_size in ["30B", "35B", "70B"] else None
+                settings["batch_size"] = 2
+                settings["use_flash_attention"] = True
+                settings["compile_model"] = True
+
+            # GPU with limited memory
+            elif system_info["has_gpu"] and any(mem > 12 for mem in system_info.get("gpu_memory", [0])):
+                settings["device"] = "cuda"
+                settings["quantization"] = "8-bit" if model_size in ["13B", "30B", "35B", "70B"] else None
+                settings["batch_size"] = 1
+                settings["use_flash_attention"] = True
+
+            # CPU with good memory
+            elif system_info["total_memory_gb"] > 32:
+                settings["quantization"] = "8-bit"
+                settings["threads"] = min(16, max(4, system_info["cpu_count"]))
+
+            # Limited CPU
+            else:
+                settings["quantization"] = "4-bit"
+                settings["max_context_length"] = 4096
+
+        # Add use_better_transformer for PyTorch models
+        settings["use_better_transformer"] = system_info["has_gpu"]
+
+        return settings
+
+    def apply_optimizations(self, model_id: str, llm_object=None) -> dict:
+        """Apply optimizations to a model based on its profile"""
+        # Profile if not already profiled
+        if model_id not in self.profiles:
+            self.profile_model(model_id)
+
+        profile = self.profiles[model_id]
+        settings = profile["settings"]
+
+        # If LLM object provided, apply settings directly
+        if llm_object and hasattr(llm_object, "set_config"):
+            config_updates = {
+                "device": settings["device"],
+                "quantization": settings["quantization"],
+                "context_length": settings["max_context_length"],
+            }
+            # Apply valid settings
+            llm_object.set_config(**{k: v for k, v in config_updates.items()
+                                   if v is not None and hasattr(llm_object, k)})
+
+        # Return the applied settings
+        return settings
+
+    def get_optimization_report(self) -> dict:
+        """Generate a report of all optimized models"""
+        from datetime import datetime
+        return {
+            "profiles": self.profiles,
+            "count": len(self.profiles),
+            "timestamp": datetime.now().isoformat()
+        }
+
+# Create global optimizer instance
+radis_optimizer = ModelOptimizer()
+
+import asyncio
+import json
+import time
+import traceback
+import os
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from datetime import datetime
+import uuid
+
+from app.agent.base import BaseAgent
+from app.agent.toolcall import ToolCallAgent
+from app.config import config
+from app.exceptions import (
+    AgentStateException,
+    EmptyResponseException,
+    LoopDetectedException,
+    ToolExecutionException,
+    AgentTimeoutException,
+    ModelUnavailableException,
+    AgentRadisException,
+)
+from app.schema import AgentMemory, Message, Role, AgentState, ToolChoice
+from app.logger import logger
+from app.tool.base import BaseTool, ToolResult
+
+# System prompt for agent initialization
+SYSTEM_PROMPT = """You are Radis, a specialized agent that uses tools to solve problems step-by-step.
+Follow this process:
+1. Analyze the request and determine optimal tools to use
+2. For each step, use EITHER reasoning OR a tool
+3. Use tools properly by specifying the name and parameters exactly
+4. Get information from searches, code execution, and other tools directly
+5. Verify your results are accurate and complete
+6. Return your final answer when complete"""
+
+# Prompt to guide the agent toward the next step
+NEXT_STEP_PROMPT = """Consider your progress so far. Choose the most appropriate action:
+1. If you have enough information, return the FINAL ANSWER
+2. If you need information, use the appropriate TOOL with correct parameters
+3. If stuck, try a DIFFERENT APPROACH using different tools or methods"""
+
+class Radis(BaseAgent):
+    """
+    Radis is a versatile agent that can use tools to assist users with various tasks.
+
+    This agent supports:
+    - Tool usage and API calling
+    - Stateful interactions
+    - Memory and context management
+    """
+
+    name: str = "Radis"
+    system_prompt: Optional[str] = SYSTEM_PROMPT
+    next_step_prompt: Optional[str] = NEXT_STEP_PROMPT
+
+    empty_response_count: int = 0
+    max_consecutive_empty_responses: int = 5  # Increased from 3 to handle more model issues
+    tools: List[BaseTool] = []
+
+    def __init__(self, **kwargs):
+        """Initialize the agent with memory, state tracking, and tools"""
+        super().__init__(**kwargs)
+        
+        # Core components
+        self.memory = AgentMemory()
+        self.state = AgentState.THINKING
+        self.start_time = 0
+        self.iteration_count = 0
+        self.consecutive_error_count = 0
+        self.empty_response_count = 0
+        self.current_prompt = ""
+        
+        # Resource tracking
+        self._active_resources = []
+        
+        # Configuration
+        self.max_execution_time = 600  # 10 minutes
+        self.max_iterations = 15
+        self.max_consecutive_errors = 3
+        
+        # Initialize tools as empty list
+        self.tools = []
+        
+        # Load MCP servers if available
+        self._load_mcp_servers()
+
+    def _load_mcp_servers(self):
+        """Load any available MCP servers"""
+        try:
+            from app.tool.mcp_installer import get_installed_servers
+
+            installed_servers = get_installed_servers()
+
+            if installed_servers:
+                logger.info(f"Loading {len(installed_servers)} installed MCP servers")
+
+                for server in installed_servers:
+                    name = server.get("name", "unknown")
+
+                    try:
+                        success = self.register_mcp_server(server)
+                        if success:
+                            logger.info(f"Registered MCP server tool: {name}")
+                        else:
+                            logger.warning(f"Failed to register MCP server: {name}")
+                    except Exception as e:
+                        logger.error(f"Error registering MCP server {name}: {e}")
+
+        except ImportError:
+            logger.debug("MCP installer not available, skipping server loading")
+        except Exception as e:
+            logger.error(f"Error loading MCP servers: {e}")
+
+    async def run(self, prompt: str) -> Dict[str, Any]:
+        """Run the agent with a prompt"""
+        # Reset state for new run
+        await self.reset()
+
+        # Store the prompt
+        self.current_prompt = prompt
+
+        try:
+            # Add system message
+            self.memory.messages.append(Message(role=Role.SYSTEM, content=self.system_prompt))
+
+            # Add user prompt
+            self.memory.messages.append(Message(role=Role.USER, content=prompt))
+
+            # Main agent loop
+            result = await self._run_with_error_handling()
+
+            # Process the final result
+            processed_result = self._process_result(result)
+
+            return {
+                "response": processed_result,
+                "status": "success"
+            }
+
+        except Exception as e:
+            logger.error(f"Error in agent.run: {e}")
+            return {
+                "response": f"Error: {str(e)}",
+                "status": "error"
+            }
+
+    def _process_result(self, result: str) -> str:
+        """Process the final result before returning to the user"""
+        # Clean up technical details
+        clean_result = result
+
+        # If searching for financial data, encourage trying different search queries
+        if "financial" in self.current_prompt or "performance" in self.current_prompt:
+            if "just returned" in result or "search query itself" in result:
+                clean_result += "\n\nI'll try different search terms to find more specific information for you."
+
+        return clean_result
+
+    # Step method implementation
+    async def step(self) -> str:
+        """
+        Execute a single step in the agent's workflow.
+
+        This implements the abstract method from BaseAgent.
+
+        Returns:
+            A string describing the result of this step
+        """
+        if self.state == AgentState.IDLE:
+            self.state = AgentState.THINKING
+            return "Started thinking"
+
+        if self.state == AgentState.THINKING:
+            # Think about next steps
+            thought = await self._think()
+
+            if "tool_call" in thought:
+                self.state = AgentState.EXECUTING
+                tool_call = thought["tool_call"]
+                return f"Decided to use tool: {tool_call.name}"
+
+            elif thought.get("status") == "RETURN":
+                self.state = AgentState.FINISHED
+                return "Task complete, returning final response"
+
+            else:
+                self.empty_response_count += 1
+                if self.empty_response_count >= self.max_consecutive_empty_responses:
+                    self.state = AgentState.FINISHED
+                    return "Too many empty responses, ending run"
+                return "Empty response, trying again"
+
+        elif self.state == AgentState.EXECUTING:
+            # Execute the last tool call
+            for message in reversed(self.memory.messages):
+                if message.tool_calls:
+                    tool_call = message.tool_calls[0]
+                    tool_result = await self._execute_tool_call(tool_call)
+                    self.state = AgentState.THINKING
+                    return f"Executed tool {tool_call.function.name}"
+
+            # No tool call found, switch back to thinking
+            self.state = AgentState.THINKING
+            return "No tool call found, returning to thinking state"
+
+        elif self.state == AgentState.FINISHED:
+            return self._generate_final_response()
+
+        return f"Unknown state: {self.state}"
+
+    async def _think(self) -> Dict[str, Any]:
+        """
+        Perform the thinking step for the agent.
+
+        This method:
+        1. Gathers all conversation history
+        2. Prepares the next step prompt with tool descriptions
+        3. Calls the LLM to decide what to do next
+        4. Parses and validates the response
+
+        Returns:
+            Dictionary with the thinking results, including any tool calls
+        """
+        # Gather conversation history for context
+        conversation = self.memory.messages
+
+        # Add next step prompt if this isn't the first thinking step
+        if self.iteration_count > 1:
+            self.memory.messages.append(Message(role=Role.SYSTEM, content=self.next_step_prompt))
+
+        # Log that we're about to call the LLM
+        logger.info(f"Calling LLM with {len(self.tools)} tools available")
+
+        # Call LLM with tools
+        response = await self.llm.ask_tool(
+            messages=conversation,
+            system_msgs=[Message(role=Role.SYSTEM, content=self.system_prompt)] if self.system_prompt else None,
+            tools=self.tools,
+            tool_choice=ToolChoice.AUTO
+        )
+
+        # Log the response details
+        has_content = bool(response.content and response.content.strip())
+        has_tool_calls = bool(response.tool_calls)
+        logger.info(f"LLM response received - has content: {has_content}, has tool calls: {has_tool_calls}")
+
+        # Add assistant's response to memory
+        self.memory.messages.append(Message(
+            role=Role.ASSISTANT,
+            content=response.content or "",
+            tool_calls=response.tool_calls
+        ))
+
+        # Check for empty content with tool calls - symptom of looping
+        if not response.content and response.tool_calls:
+            logger.warning("⚠️ Empty content with tool calls detected - possible looping")
+
+            # Add a message to guide the model
+            self.memory.messages.append(Message(
+                role=Role.SYSTEM,
+                content="I notice you're making tool calls without providing any reasoning. "
+                "Please explain your thought process before using tools."
+            ))
+
+        # Return the thinking results
+        result = {
+            "status": "CONTINUE",
+            "is_empty": not response.content and not response.tool_calls
+        }
+
+        # Check for termination indicators in the content
+        if response.content and not response.tool_calls:
+            content_lower = response.content.lower()
+            # Check for phrases that indicate the agent is done
+            terminate_indicators = [
+                "final answer:",
+                "final response:",
+                "to summarize,",
+                "in conclusion,",
+                "my answer is:",
+                "here's my final answer:",
+                "this concludes my",
+                "completion of task",
+                "task completed",
+                "finished with the task",
+                "i have completed the task"
+            ]
+
+            # If any terminate indicator is found, mark as RETURN
+            if any(indicator in content_lower for indicator in terminate_indicators):
+                logger.info("Detected termination indicator in response")
+                result["status"] = "RETURN"
+
+        # Handle tool calls
+        if response.tool_calls:
+            # Take the first tool call
+            tool_call = response.tool_calls[0]
+            result["tool_call"] = tool_call
+            self.state = AgentState.EXECUTING
+
+        # Return result
+        return result
+
+    async def _execute_tool_call(self, tool_call: Any) -> None:
+        """
+        Execute a tool call based on LLM output
+
+        Args:
+            tool_call: Tool call information
+        """
+        tool_name = tool_call.function.name if hasattr(tool_call, 'function') else tool_call.get("name", "")
+        tool_args = {}
+
+        # Parse arguments
+        try:
+            if hasattr(tool_call, 'function') and hasattr(tool_call.function, 'arguments'):
+                args_str = tool_call.function.arguments
+            else:
+                args_str = tool_call.get("arguments", "{}")
+
+            tool_args = json.loads(args_str)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid tool arguments: {args_str}")
+            self.memory.messages.append(Message(
+                role=Role.SYSTEM,
+                content=f"Error: Could not parse the arguments for tool {tool_name}. "
+                "Please provide valid JSON."
+            ))
+            return
+
+        # Execute the tool
+        try:
+            logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+
+            # Find the tool in our tools list
+            tool = None
+            for t in self.tools:
+                if hasattr(t, 'name') and t.name == tool_name:
+                    tool = t
+                    break
+
+            if not tool:
+                raise ValueError(f"Tool {tool_name} not found")
+
+            # Execute the tool
+            result = await tool.execute(**tool_args)
+
+            # Add tool result to memory
+            if hasattr(result, 'tool') and hasattr(result, 'result'):
+                self.memory.messages.append(Message(
+                    role=Role.TOOL,
+                    name=result.tool,
+                    content=str(result.result)
+                ))
+            else:
+                # Handle simple format
+                self.memory.messages.append(Message(
+                    role=Role.TOOL,
+                    name=tool_name,
+                    content=str(result)
+                ))
+
+            logger.info(f"Tool result: {str(result)[:300]}{'...' if len(str(result)) > 300 else ''}")
+
+        except Exception as e:
+            error_message = f"Error executing tool {tool_name}: {str(e)}"
+            logger.error(error_message)
+
+            # Add error message to memory
+            self.memory.messages.append(Message(
+                role=Role.TOOL,
+                name=tool_name,
+                content=f"Error: {str(e)}"
+            ))
+
+    def _generate_final_response(self) -> str:
+        """
+        Generate a final response to the user.
+
+        Returns the final response text, typically extracted from the last assistant message.
+        """
+        # First, look for the last assistant message
+        assistant_messages = [m for m in self.memory.messages if m.role == Role.ASSISTANT and m.content]
+
+        if assistant_messages:
+            # Return the content of the last substantive assistant message
+            last_message = assistant_messages[-1]
+            return last_message.content
+
+        # If no assistant message with content, provide a default response
+        return "I've processed your request, but could not generate a specific response."
+
+    async def register_mcp_server(self, server_info: Dict[str, Any]) -> bool:
+        """
+        Register a Model Context Protocol (MCP) server as a tool.
+
+        Args:
+            server_info: Dictionary containing server information
+
+        Returns:
+            True if registration was successful, False otherwise
+        """
+        try:
+            # Import MCP client on demand to avoid circular imports
+            from app.mcp.client import create_mcp_tool_from_server_info
+
+            # Create and register the tool
+            mcp_tool = create_mcp_tool_from_server_info(server_info)
+            if mcp_tool:
+                self.tools.append(mcp_tool)
+                return True
+
+            return False
+
+        except ImportError:
+            logger.error("Failed to import MCP client - MCP support not available")
+            return False
+        except Exception as e:
+            logger.error(f"Error registering MCP server: {e}")
+            return False
+
+    async def reset(self) -> None:
+        """Reset the agent state for a new conversation"""
+        # Reset conversation
+        self.memory = AgentMemory()
+
+        # Reset state tracking
+        self.state = AgentState.THINKING
+        self.start_time = time.time()
+        self.iteration_count = 0
+        self.consecutive_error_count = 0
+        self.empty_response_count = 0
+        # Reset tools
+        for tool in self.tools:
+            try:
+                if hasattr(tool, "reset") and callable(tool.reset):
+                    await tool.reset()
+            except Exception as e:
+                logger.warning(f"Failed to reset tool {getattr(tool, 'name', 'unknown')}: {e}")
+
+        # Clean up resources
+        await self._cleanup_resources()
+
+    async def _cleanup_resources(self) -> None:
+        """
+        Clean up resources used by the agent.
+
+        This releases any resources (like browser instances) that the agent is using.
+        """
+        errors = []
+
+        # Skip cleanup if no resources
+        if not self._active_resources:
+            return
+
+        for resource in list(self._active_resources):
+            try:
+                # Skip resources that are not objects or don't have cleanup methods
+                if resource is None or not hasattr(resource, "__class__"):
+                    continue
+
+                # Add a timeout to avoid hanging during cleanup
+                try:
+                    if hasattr(resource, "close") and callable(resource.close):
+                        if asyncio.iscoroutinefunction(resource.close):
+                            await asyncio.wait_for(resource.close(), timeout=5.0)
+                        else:
+                            resource.close()
+                    elif hasattr(resource, "quit") and callable(resource.quit):
+                        if asyncio.iscoroutinefunction(resource.quit):
+                            await asyncio.wait_for(resource.quit(), timeout=5.0)
+                        else:
+                            resource.quit()
+                    elif hasattr(resource, "cleanup") and callable(resource.cleanup):
+                        if asyncio.iscoroutinefunction(resource.cleanup):
+                            await asyncio.wait_for(resource.cleanup(), timeout=5.0)
+                        else:
+                            resource.cleanup()
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout while cleaning up resource: {type(resource).__name__}")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up resource: {type(resource).__name__}: {e}")
+
+                # Always consider the resource cleaned, even if it caused an error
+                if resource in self._active_resources:
+                    self._active_resources.remove(resource)
+
+            except Exception as e:
+                logger.warning(f"Unexpected error handling resource: {e}")
+                errors.append(str(e))
+
+        self._active_resources = []
+
+        if errors:
+            logger.error(f"Errors during resource cleanup: {', '.join(errors)}")
+
+    async def _run_with_error_handling(self) -> str:
+        """
+        Run the agent loop with error handling.
+
+        This method implements the main agent loop with error handling and
+        state tracking.
+
+        Returns:
+            The final response string for the user
+        """
+        try:
+            # Initialize start time if not already set
+            if self.start_time == 0:
+                self.start_time = time.time()
+
+            # Main agent loop
+            while self.state != AgentState.DONE:
+                # Check if we've run for too long
+                elapsed_time = time.time() - self.start_time
+                if elapsed_time > self.max_execution_time:
+                    # Get the number of completed steps
+                    steps_completed = sum(1 for action in self.memory.actions if action is not None)
+                    self.memory.messages.append(
+                        Message(
+                            role=Role.SYSTEM,
+                            content=f"You have exceeded the maximum execution time of {self.max_execution_time} seconds. "
+                            "Please provide a final response to the user with what you've learned so far."
+                        )
+                    )
+                    self.state = AgentState.DONE
+                    logger.warning(f"Exceeded max execution time of {self.max_execution_time}s")
+                    continue
+
+                # Check if we've run too many iterations
+                if self.iteration_count >= self.max_iterations:
+                    # Instead of raising exception, transition to DONE state
+                    self.memory.messages.append(
+                        Message(
+                            role=Role.SYSTEM,
+                            content=f"You have reached the maximum number of iterations ({self.max_iterations}). "
+                            "Please provide a final response to the user with what you've learned so far."
+                        )
+                    )
+                    self.state = AgentState.DONE
+                    logger.warning(f"Reached max iterations: {self.max_iterations}")
+                    continue
+
+                # Check if too many consecutive errors
+                if self.consecutive_error_count >= self.max_consecutive_errors:
+                    self.memory.messages.append(
+                        Message(
+                            role=Role.SYSTEM,
+                            content=f"You have encountered {self.consecutive_error_count} consecutive errors. "
+                            "Please provide a final response to the user with what you've learned so far."
+                        )
+                    )
+                    self.state = AgentState.DONE
+                    logger.warning(f"Reached max consecutive errors: {self.consecutive_error_count}")
+                    continue
+
+                # Check if too many consecutive empty responses
+                if self.empty_response_count >= self.max_consecutive_empty_responses:
+                    self.memory.messages.append(
+                        Message(
+                            role=Role.SYSTEM,
+                            content=f"You have generated {self.empty_response_count} consecutive empty responses. "
+                            "Please provide a final response to the user with what you've learned so far."
+                        )
+                    )
+                    self.state = AgentState.DONE
+                    logger.warning(f"Reached max empty responses: {self.empty_response_count}")
+                    continue
+
+                # Increment iteration counter
+                self.iteration_count += 1
+                logger.info(f"Starting iteration {self.iteration_count}/{self.max_iterations}")
+
+                # Main state machine
+                if self.state == AgentState.THINKING:
+                    # Think about next steps
+                    try:
+                        thought = await self._think()
+
+                        # Reset consecutive error counter on successful thinking
+                        self.consecutive_error_count = 0
+
+                        # Check if we have a tool call
+                        if "tool_call" in thought:
+                            # Execute tool and transition to executing state
+                            tool_call = thought["tool_call"]
+                            if tool_call:
+                                await self._execute_tool_call(tool_call)
+                                # After execution, the agent should think again
+                                continue
+
+                        # Check if we should return a direct response
+                        elif "status" in thought and thought["status"] == "RETURN":
+                            # Transition to done state
+                            self.state = AgentState.DONE
+                            logger.info("Agent has decided to return a response")
+                            continue
+
+                        elif thought.get("is_empty", False):
+                            # Handle empty response
+                            self.empty_response_count += 1
+                            self.memory.messages.append(
+                                Message(
+                                    role=Role.SYSTEM,
+                                    content="Your last response was empty. Please provide a meaningful response or use a tool."
+                                )
+                            )
+                            # Stay in thinking state
+                            continue
+
+                    except Exception as e:
+                        error_str = str(e)
+                        self.consecutive_error_count += 1
+
+                        # Log any error but don't treat API errors differently
+                        logger.error(f"Error in thinking phase: {error_str}")
+                        self.memory.messages.append(Message(role=Role.SYSTEM, content=f"Error in thinking: {error_str}"))
+
+                        # If we've hit our error threshold, exit the loop
+                        if self.consecutive_error_count >= self.max_consecutive_errors:
+                            self.memory.messages.append(
+                                Message(
+                                    role=Role.SYSTEM,
+                                    content=f"You have encountered {self.consecutive_error_count} consecutive errors. "
+                                    "Please provide a final response to the user with what you've learned so far."
+                                )
+                            )
+                            self.state = AgentState.DONE
+                            continue
+
+                elif self.state == AgentState.EXECUTING:
+                    # After execution, go back to thinking
+                    self.state = AgentState.THINKING
+
+                elif self.state == AgentState.DONE:
+                    # This should not be reached as we check at the start of the loop
+                    break
+
+            # Generate the final response when we're done
+            logger.info("Agent run complete, generating final response")
+            final_response = self._generate_final_response()
+            return final_response
+
+        except Exception as e:
+            logger.error(f"Error in agent loop: {traceback.format_exc()}")
+            # Log diagnostic information
+            elapsed_time = time.time() - self.start_time
+            logger.error(f"Diagnostic info: iteration={self.iteration_count}, "
+                        f"elapsed_time={elapsed_time:.2f}s, "
+                        f"state={self.state}, "
+                        f"error_count={self.consecutive_error_count}")
+
+            # Add error message to memory for agent awareness
+            self.memory.messages.append(
+                Message(
+                    role=Role.SYSTEM,
+                    content=f"An error occurred: {str(e)}. Please provide your best response with the information you have."
+                )
+            )
+
+            # Increment error counter and check if we should terminate
+            self.consecutive_error_count += 1
+            if self.consecutive_error_count >= self.max_consecutive_errors:
+                self.state = AgentState.DONE
+
+            # Return a helpful error message rather than crashing
+            return f"I encountered a technical issue while processing your request. Here's what I learned before the error: {self._generate_final_response()}"

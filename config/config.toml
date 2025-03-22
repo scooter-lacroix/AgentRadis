@@ -1,0 +1,27 @@
+# Global LLM configuration
+[llm]
+model = "gemma-3-27b-it"
+api_base = "http://127.0.0.1:1234/v1"
+base_url = "http://127.0.0.1:1234/v1"
+api_key = "lm-studio"
+max_tokens = 8010
+temperature = 0.1
+
+# Optional configuration for specific LLM models
+[llm.vision]
+model = "gemma-3-4b-it"
+api_base = "http://127.0.0.1:1234/v1"
+base_url = "http://127.0.0.1:1234/v1"
+api_key = "lm-studio"
+
+[browser]
+headless = true
+chrome_instance_path = "/usr/bin/firefox"
+disable_security = false
+extra_chromium_args = ["--headless", "--disable-gpu"]
+# [browser.proxy]
+# server = "http://proxy-server:port"
+# username = "proxy-username"
+# password = "proxy-password"
+
+# Note: Ensure that all instances of browsers are closed before attempting to start a new one, especially when working with multiple instances or

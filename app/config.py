@@ -1,0 +1,513 @@
+"""
+Configuration module for AgentRadis.
+
+This module handles configuration loading, validation, and provides defaults
+for all AgentRadis components.
+"""
+import os
+import sys
+import json
+import logging
+import tomli
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Union, Any
+from enum import Enum
+import platform
+
+# Default configuration paths
+DEFAULT_CONFIG_PATH = "config.json"
+USER_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".agentradis")
+USER_CONFIG_PATH = os.path.join(USER_CONFIG_DIR, "config.json")
+ENV_CONFIG_PATH = os.getenv("AGENTRADIS_CONFIG", "")
+
+# TOML Configuration paths
+DEFAULT_TOML_PATH = "config/config.toml"
+USER_TOML_PATH = os.path.join(USER_CONFIG_DIR, "config.toml")
+ENV_TOML_PATH = os.getenv("AGENTRADIS_TOML_CONFIG", "")
+
+# Environment variable prefixes
+ENV_PREFIX = "AGENTRADIS_"
+
+
+class LogLevel(Enum):
+    """Log level enum for configuration"""
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for LLM providers"""
+    # Default model to use
+    model: str = "mistralai/mistral-7b-instruct"
+    # Default model for fallback
+    fallback_model: Optional[str] = None
+    # API key (can be overridden by env var)
+    api_key: str = ""
+    # API endpoint
+    api_base: str = ""
+    # API type (openai, mistral, anthropic, etc.)
+    api_type: str = "mistral"
+    # Maximum tokens to generate
+    max_tokens: int = 4096
+    # Temperature for generation
+    temperature: float = 0.7
+    # Maximum retries on failure
+    max_retries: int = 3
+    # Timeout in seconds
+    timeout: float = 120.0
+    # Whether to stream responses
+    stream: bool = False
+    
+    def __post_init__(self):
+        # Check for environment variables
+        if not self.api_key:
+            env_var = f"{ENV_PREFIX}{self.api_type.upper()}_API_KEY"
+            self.api_key = os.getenv(env_var, "")
+
+
+@dataclass
+class WebSearchConfig:
+    """Configuration for web search tools"""
+    # Whether to auto-initialize engines
+    auto_init: bool = True
+    # Default search engine
+    default_engine: str = "google"
+    # Default number of results
+    default_results: int = 8
+    # Enable/disable specific engines
+    engines_enabled: Dict[str, bool] = field(default_factory=lambda: {
+        "google": True,
+        "duckduckgo": True,
+        "baidu": False
+    })
+    # Cache settings
+    cache_enabled: bool = True
+    cache_duration: int = 3600  # seconds
+
+
+@dataclass
+class BrowserConfig:
+    """Configuration for browser automation"""
+    # Whether to run headless
+    headless: bool = True
+    # Browser executable path
+    executable_path: str = ""
+    # Default timeout
+    timeout: float = 60.0
+    # Whether to use stealth mode
+    stealth_mode: bool = True
+    # User agent to use (empty for default)
+    user_agent: str = ""
+    # Maximum page load time
+    max_page_load_time: float = 30.0
+    # Maximum browser instances
+    max_instances: int = 3
+
+
+@dataclass
+class AgentConfig:
+    """Configuration for agent behavior"""
+    # Maximum iterations in a loop
+    max_iterations: int = 25
+    # Maximum execution time in seconds
+    max_execution_time: float = 300.0
+    # Maximum consecutive empty responses
+    max_consecutive_empty: int = 5
+    # Maximum consecutive errors
+    max_consecutive_errors: int = 3
+    # Memory settings
+    memory_limit: int = 50  # Number of recent messages to keep
+    # Planning enabled
+    planning_enabled: bool = True
+    # Whether to use structured tools
+    structured_tools: bool = True
+
+
+@dataclass
+class LoggingConfig:
+    """Configuration for logging"""
+    # Log level
+    level: LogLevel = LogLevel.INFO
+    # Log file path (empty for stdout only)
+    file_path: str = ""
+    # Log format
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # Whether to log to console
+    console: bool = True
+    # Maximum log file size in MB
+    max_file_size: int = 10
+    # Maximum number of backup files
+    backup_count: int = 3
+
+
+@dataclass
+class Config:
+    """Main configuration class for AgentRadis"""
+    # Meta configuration
+    app_name: str = "AgentRadis"
+    version: str = "0.2.0"
+    
+    # System information
+    system_info: Dict[str, str] = field(default_factory=lambda: {
+        "python_version": platform.python_version(),
+        "os": platform.system(),
+        "os_version": platform.version(),
+        "cpu_count": str(os.cpu_count()),
+    })
+    
+    # Core configurations
+    llm: Dict[str, LLMConfig] = field(default_factory=lambda: {
+        "openai": LLMConfig(
+            api_type="openai",
+            model="gpt-4-turbo-preview",
+            fallback_model="gpt-3.5-turbo-0125"
+        ),
+        "anthropic": LLMConfig(
+            api_type="anthropic",
+            model="claude-3-opus-20240229",
+            fallback_model="claude-3-sonnet-20240229"
+        ),
+        "mistral": LLMConfig(
+            api_type="mistral",
+            model="mistralai/mistral-7b-instruct",
+            fallback_model="mistralai/mistral-small"
+        )
+    })
+    active_llm: str = "openai"
+    
+    # Tool configurations
+    web_search: WebSearchConfig = field(default_factory=WebSearchConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
+    
+    # Agent configuration
+    agent: AgentConfig = field(default_factory=AgentConfig)
+    
+    # Logging configuration
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+
+    # Server configuration
+    host: str = "127.0.0.1"
+    port: int = 8000
+    debug: bool = False
+    
+    # Additional configurations
+    tool_paths: List[str] = field(default_factory=lambda: ["app.tool"])
+    additional_prompts: Dict[str, str] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Initialize config after loading"""
+        # Set up system information
+        self.system_info = {
+            "python_version": platform.python_version(),
+            "os": platform.system(),
+            "os_version": platform.version(),
+            "cpu_count": str(os.cpu_count()),
+        }
+    
+    def get_llm_config(self) -> LLMConfig:
+        """Get the active LLM configuration"""
+        return self.llm.get(self.active_llm, next(iter(self.llm.values())))
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert config to dictionary for serialization"""
+        result = {}
+        for key, value in self.__dict__.items():
+            if isinstance(value, Dict):
+                result[key] = {k: v.__dict__ if hasattr(v, '__dict__') else v for k, v in value.items()}
+            elif hasattr(value, '__dict__'):
+                result[key] = value.__dict__
+            else:
+                result[key] = value
+        return result
+    
+    def save(self, path: str = DEFAULT_CONFIG_PATH) -> None:
+        """Save config to file"""
+        config_dir = os.path.dirname(path)
+        if config_dir and not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+            
+        with open(path, 'w') as f:
+            json.dump(self.to_dict(), f, indent=4)
+
+
+def load_config() -> Config:
+    """
+    Load configuration from files and environment variables.
+    
+    Looks for configuration in the following order:
+    1. Default config
+    2. User config (~/.agentradis/config.json)
+    3. Environment-specified config (AGENTRADIS_CONFIG)
+    4. TOML configs (config/config.toml, ~/.agentradis/config.toml, AGENTRADIS_TOML_CONFIG)
+    5. Environment variables with AGENTRADIS_ prefix
+    
+    Returns:
+        Config: The loaded and merged configuration
+    """
+    config = Config()
+    
+    # Try to load user config (JSON)
+    if os.path.exists(USER_CONFIG_PATH):
+        try:
+            with open(USER_CONFIG_PATH, 'r') as f:
+                user_config = json.load(f)
+                update_config_from_dict(config, user_config)
+        except Exception as e:
+            print(f"Warning: Failed to load user config: {e}", file=sys.stderr)
+    
+    # Try to load environment-specified config (JSON)
+    if ENV_CONFIG_PATH and os.path.exists(ENV_CONFIG_PATH):
+        try:
+            with open(ENV_CONFIG_PATH, 'r') as f:
+                env_config = json.load(f)
+                update_config_from_dict(config, env_config)
+        except Exception as e:
+            print(f"Warning: Failed to load environment config: {e}", file=sys.stderr)
+    
+    # Try to load TOML configs
+    # Check if DEFAULT_TOML_PATH exists and load it
+    if os.path.exists(DEFAULT_TOML_PATH):
+        try:
+            with open(DEFAULT_TOML_PATH, 'rb') as f:
+                toml_config = tomli.load(f)
+                update_config_from_toml(config, toml_config)
+        except Exception as e:
+            print(f"Warning: Failed to load default TOML config: {e}", file=sys.stderr)
+    
+    # Check if USER_TOML_PATH exists and load it
+    if os.path.exists(USER_TOML_PATH):
+        try:
+            with open(USER_TOML_PATH, 'rb') as f:
+                user_toml_config = tomli.load(f)
+                update_config_from_toml(config, user_toml_config)
+        except Exception as e:
+            print(f"Warning: Failed to load user TOML config: {e}", file=sys.stderr)
+    
+    # Check if ENV_TOML_PATH exists and load it
+    if ENV_TOML_PATH and os.path.exists(ENV_TOML_PATH):
+        try:
+            with open(ENV_TOML_PATH, 'rb') as f:
+                env_toml_config = tomli.load(f)
+                update_config_from_toml(config, env_toml_config)
+        except Exception as e:
+            print(f"Warning: Failed to load environment TOML config: {e}", file=sys.stderr)
+    
+    # Override with environment variables
+    override_config_from_env(config)
+    
+    # Set up logging based on config
+    setup_logging(config.logging)
+    
+    return config
+
+
+def update_config_from_dict(config: Config, data: Dict[str, Any]) -> None:
+    """Update config object from a dictionary"""
+    for key, value in data.items():
+        if hasattr(config, key):
+            if isinstance(value, dict) and hasattr(getattr(config, key), '__dict__'):
+                # If it's a nested object
+                update_config_from_dict(getattr(config, key), value)
+            else:
+                # Direct value assignment
+                setattr(config, key, value)
+
+
+def update_config_from_toml(config: Config, toml_data: Dict[str, Any]) -> None:
+    """Update config from TOML data structure
+    
+    Args:
+        config: The config instance to update
+        toml_data: TOML configuration data
+    """
+    # Handle LLM configuration
+    if 'llm' in toml_data:
+        llm_config = toml_data['llm']
+        # Main LLM config
+        if not isinstance(llm_config.get('model', ''), dict):
+            # Update active LLM - if not explicitly set, use mistral
+            active_llm = config.active_llm
+            
+            # Create or update LLM config
+            if active_llm not in config.llm:
+                config.llm[active_llm] = LLMConfig(api_type=active_llm)
+            
+            # Update fields
+            for key, value in llm_config.items():
+                if key != 'vision' and hasattr(config.llm[active_llm], key):
+                    setattr(config.llm[active_llm], key, value)
+        
+        # Vision LLM config if present
+        if 'vision' in llm_config:
+            vision_config = llm_config['vision']
+            # Create or update vision model config
+            if 'vision' not in config.llm:
+                config.llm['vision'] = LLMConfig(api_type='vision')
+            
+            # Update fields
+            for key, value in vision_config.items():
+                if hasattr(config.llm['vision'], key):
+                    setattr(config.llm['vision'], key, value)
+    
+    # Handle browser configuration
+    if 'browser' in toml_data:
+        browser_config = toml_data['browser']
+        for key, value in browser_config.items():
+            if key != 'proxy' and hasattr(config.browser, key):
+                if key == 'chrome_instance_path':
+                    config.browser.executable_path = value
+                else:
+                    setattr(config.browser, key, value)
+    
+    # Handle other top-level configurations
+    for key, value in toml_data.items():
+        if key not in ['llm', 'browser'] and hasattr(config, key):
+            if isinstance(value, dict) and hasattr(getattr(config, key), '__dict__'):
+                # If it's a nested object
+                update_config_from_dict(getattr(config, key), value)
+            else:
+                # Direct value assignment
+                setattr(config, key, value)
+
+
+def override_config_from_env(config: Config) -> None:
+    """Override config with environment variables"""
+    # Check for LLM API keys
+    for llm_type, llm_config in config.llm.items():
+        env_var = f"{ENV_PREFIX}{llm_type.upper()}_API_KEY"
+        if os.getenv(env_var):
+            llm_config.api_key = os.getenv(env_var)
+    
+    # Check for active LLM override
+    if os.getenv(f"{ENV_PREFIX}ACTIVE_LLM"):
+        config.active_llm = os.getenv(f"{ENV_PREFIX}ACTIVE_LLM")
+    
+    # Check for host/port overrides
+    if os.getenv(f"{ENV_PREFIX}HOST"):
+        config.host = os.getenv(f"{ENV_PREFIX}HOST")
+    if os.getenv(f"{ENV_PREFIX}PORT"):
+        try:
+            config.port = int(os.getenv(f"{ENV_PREFIX}PORT"))
+        except ValueError:
+            pass
+    
+    # Debug mode override
+    if os.getenv(f"{ENV_PREFIX}DEBUG"):
+        config.debug = os.getenv(f"{ENV_PREFIX}DEBUG").lower() in ('1', 'true', 'yes')
+
+
+def setup_logging(logging_config: LoggingConfig) -> None:
+    """Set up logging based on configuration"""
+    log_level = getattr(logging, logging_config.level.value)
+    logging.basicConfig(
+        level=log_level,
+        format=logging_config.format,
+        handlers=[]
+    )
+    
+    # Add console handler if enabled
+    if logging_config.console:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        formatter = logging.Formatter(logging_config.format)
+        console_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(console_handler)
+    
+    # Add file handler if path is specified
+    if logging_config.file_path:
+        try:
+            # Ensure directory exists
+            log_dir = os.path.dirname(logging_config.file_path)
+            if log_dir and not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+                
+            # Set up rotating file handler
+            from logging.handlers import RotatingFileHandler
+            file_handler = RotatingFileHandler(
+                logging_config.file_path,
+                maxBytes=logging_config.max_file_size * 1024 * 1024,
+                backupCount=logging_config.backup_count
+            )
+            file_handler.setLevel(log_level)
+            formatter = logging.Formatter(logging_config.format)
+            file_handler.setFormatter(formatter)
+            logging.getLogger().addHandler(file_handler)
+        except Exception as e:
+            print(f"Warning: Failed to set up file logging: {e}", file=sys.stderr)
+
+
+def print_config():
+    """Print current configuration information"""
+    # ANSI color codes for formatting
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+    
+    print("\nCurrent Configuration:")
+    print(f"{BOLD}Active LLM:{RESET} {config.active_llm}")
+    print(f"{BOLD}Model:{RESET} {config.get_llm_config().model}")
+    
+    # Get base URL with priority
+    llm_config = config.get_llm_config()
+    base_url = None
+    for field in ['api_base', 'base_url']:
+        if hasattr(llm_config, field) and getattr(llm_config, field):
+            base_url = getattr(llm_config, field)
+            break
+            
+    if base_url:
+        print(f"{BOLD}Base URL:{RESET} {base_url}")
+    else:
+        print(f"{BOLD}Base URL:{RESET} {RED}Not configured{RESET}")
+        
+    if llm_config.api_key:
+        print(f"{BOLD}API Key:{RESET} {GREEN}[Set]{RESET}")
+    else:
+        print(f"{BOLD}API Key:{RESET} {RED}[Not Set]{RESET}")
+        
+    print(f"{BOLD}Temperature:{RESET} {llm_config.temperature}")
+    print(f"{BOLD}Max Tokens:{RESET} {llm_config.max_tokens}")
+    
+    print(f"\n{BOLD}Browser Configuration:{RESET}")
+    print(f"{BOLD}Headless:{RESET} {config.browser.headless}")
+    
+    browser_path = config.browser.executable_path
+    if browser_path:
+        print(f"{BOLD}Browser Path:{RESET} {browser_path}")
+    else:
+        print(f"{BOLD}Browser Path:{RESET} {YELLOW}[Not Set]{RESET}")
+        
+    # Check API connectivity
+    if base_url:
+        print(f"\n{BOLD}API Connectivity Check:{RESET}")
+        
+        # Add /models endpoint to test if not already present
+        test_url = base_url
+        if not test_url.endswith('/'):
+            test_url += '/'
+        if not test_url.endswith('models'):
+            test_url += 'models'
+            
+        import httpx
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(test_url)
+                if response.status_code < 400:
+                    print(f"{GREEN}✓ Successfully connected to LLM API{RESET}")
+                else:
+                    print(f"{RED}✗ API server returned status code {response.status_code}{RESET}")
+        except httpx.ConnectError:
+            print(f"{RED}✗ Could not connect to API server. Is LM Studio running?{RESET}")
+        except Exception as e:
+            print(f"{RED}✗ Error connecting to API: {str(e)}{RESET}")
+
+
+# Create config instance
+config = load_config()
