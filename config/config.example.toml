@@ -1,44 +1,168 @@
+# AgentRadis Configuration File
+
 # Global LLM configuration
 [llm]
-model = "gemma-3-27b-it"
-base_url = "http://127.0.0.1:1234/v1"
-api_key = "sk-..."
-max_tokens = 4096
-temperature = 0.0
+model = "gpt-4"                # Main LLM model
+base_url = "https://api.openai.com/v1"  # API endpoint
+api_key = ""                   # Your API key (leave empty to use env var)
+max_tokens = 4096              # Maximum response length
+temperature = 0.0              # Response randomness (0.0-2.0)
+timeout = 60                   # API request timeout (seconds)
+retry_attempts = 3             # Number of retry attempts on failure
+streaming = true               # Enable streaming responses
 
-# [llm] #AZURE OPENAI:
-# api_type= 'azure'
-# model = "YOUR_MODEL_NAME" #"gpt-4o-mini"
-# base_url = "{YOUR_AZURE_ENDPOINT.rstrip('/')}/openai/deployments/{AZURE_DEPOLYMENT_ID}"
-# api_key = "AZURE API KEY"
-# max_tokens = 8096
-# temperature = 0.0
-# api_version="AZURE API VERSION" #"2024-08-01-preview"
-
-# Optional configuration for specific LLM models
+# Vision model configuration
 [llm.vision]
-model = "gemma-3-27b-it"
-base_url = "http://127.0.0.1:1234/v1"
-api_key = "sk-..."
+model = "gpt-4-vision-preview" # Vision-capable model
+base_url = "https://api.openai.com/v1"
+api_key = ""                   # Can be different from main API key
+max_tokens = 4096
+detail_level = "high"          # Image detail level (low, medium, high)
 
-# Optional configuration for specific browser configuration
- [browser]
-# Whether to run browser in headless mode (default: false)
-headless = false
-# Disable browser security features (default: true)
-disable_security = true
-# Extra arguments to pass to the browser
-#extra_chromium_args = []
-# Path to a Chrome instance to use to connect to your normal browser
-# e.g. '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-chrome_instance_path = "/usr/bin/chromium"
-# Connect to a browser instance via WebSocket
-#wss_url = ""
-# Connect to a browser instance via CDP
-#cdp_url = ""
+# Alternative LLM providers
+[llm.providers.anthropic]
+enabled = false
+model = "claude-3-opus-20240229"
+api_key = ""
 
-# Optional configuration, Proxy settings for the browser
-# [browser.proxy]
-# server = "http://proxy-server:port"
-# username = "proxy-username"
-# password = "proxy-password"
+[llm.providers.azure]
+enabled = false
+model = "gpt-4"
+api_key = ""
+endpoint = "https://your-endpoint.openai.azure.com/"
+api_version = "2023-05-15"
+
+[llm.providers.local]
+enabled = true                # Local LLM support
+model = "llama3"               # Model name in Ollama or similar
+endpoint = "http://localhost:11434/v1"
+
+# MCP app store settings
+[mcp]
+enabled = true                 # Enable MCP app store
+server_url = "http://localhost:5004"
+install_dir = "./mcp_apps"
+auto_update = true             # Automatically update MCP apps
+verify_signatures = true       # Verify app signatures for security
+
+# Speech tool settings
+[speech]
+enabled = true                 # Enable speech capabilities
+stt_model = "tiny.en"          # Speech-to-text model (tiny.en, base.en, large)
+stt_engine = "whisper"         # STT engine (whisper, faster_whisper)
+tts_model = "tts-1"            # Text-to-speech model
+tts_voice = "alloy"            # Voice to use (alloy, echo, fable, onyx, nova, shimmer)
+auto_transcribe = false        # Automatically transcribe audio input
+language = "en"                # Default language
+sample_rate = 16000            # Audio sample rate
+silence_threshold = 0.1        # Silence detection threshold
+silence_duration = 1.0         # Silence duration to end recording (seconds)
+
+# Web search configuration
+[web_search]
+enabled = true                 # Enable web search
+default_engine = "google"      # Default search engine
+engines = ["google", "bing", "duckduckgo", "brave"]
+cache_results = true           # Cache search results
+cache_ttl = 300                # Cache duration (seconds)
+max_results = 10               # Maximum results per search
+timeout = 30                   # Search timeout (seconds)
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+# Tool-specific settings
+[tools]
+allow_terminal = true          # Allow terminal commands
+allow_python_exec = true       # Allow Python code execution
+allow_file_access = true       # Allow file system access
+show_hidden_files = false      # Show hidden files in file listings
+sudo_allowed = false           # Allow sudo commands (use with caution)
+max_file_size = 10485760       # Maximum file size to handle (10MB)
+restricted_paths = ["/etc", "/var"]  # Paths restricted from access
+allowed_python_modules = ["os", "sys", "re", "json", "requests", "numpy", "pandas"] # Allowed modules for Python execution
+
+# Agent behavior settings
+[agent]
+max_steps = 100                # Maximum execution steps
+memory_limit = 50              # Number of messages to keep in memory
+tool_choice = "auto"           # Tool choice mode: auto, required, none
+system_prompt = "You are a helpful AI assistant with access to various tools."
+default_agent = "radis"        # Default agent type (radis, toolcall, planning)
+timeout = 300                  # Agent session timeout (seconds)
+verbose_logging = true         # Enable detailed logging
+keep_history = true            # Maintain conversation history
+
+# Web interface settings
+[web]
+enabled = true                 # Enable web interface
+host = "0.0.0.0"               # Host to bind to
+port = 5000                    # Port to listen on
+debug = false                  # Enable debug mode
+require_auth = false           # Require authentication
+theme = "dark"                 # UI theme (dark, light)
+max_upload_size = 52428800     # Maximum upload size (50MB)
+
+# API settings
+[api]
+enabled = true                 # Enable API server
+host = "0.0.0.0"               # Host to bind to
+port = 5001                    # Port to listen on
+debug = false                  # Enable debug mode
+require_auth = true            # Require authentication
+rate_limit = 100               # Requests per minute
+cors_origins = ["http://localhost:3000", "https://yourapp.com"]
+
+# Logging configuration
+[logging]
+level = "INFO"                 # Logging level (DEBUG, INFO, WARNING, ERROR)
+log_file = "logs/agent.log"    # Log file location
+max_size = 10485760            # Maximum log file size (10MB)
+backup_count = 5               # Number of backup logs to keep
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# String replacement tool settings
+[str_replace]
+backup_files = true            # Create backups before making changes
+max_batch_size = 20            # Maximum number of files to process in batch mode
+default_use_regex = false      # Default setting for regex usage
+interactive_mode = false       # Ask for confirmation before replacements
+
+# Browser tool settings
+[browser]
+headless = false               # Whether to run browser in headless mode
+disable_security = true        # Disable browser security features
+chrome_instance_path = "/usr/bin/chromium"  # Path to Chrome instance
+timeout = 30                   # Browser operation timeout (seconds)
+max_concurrent = 5             # Maximum concurrent browser sessions
+user_data_dir = "./browser_data"  # Directory to store browser data
+
+# Planning tool settings
+[planning]
+max_plan_steps = 20            # Maximum steps in a plan
+review_plans = true            # Review plans before execution
+plan_timeout = 600             # Maximum time for plan execution (seconds)
+retry_failed_steps = true      # Retry failed steps in a plan
+
+# Terminal tool settings
+[terminal]
+max_output_size = 1048576      # Maximum output size (1MB)
+timeout = 60                   # Command timeout (seconds)
+allow_sudo = false             # Allow sudo commands
+restricted_commands = ["rm -rf /", "mkfs", "dd"]  # Blocked commands
+working_dir = "./"             # Default working directory
+
+# Python execution settings
+[python_exec]
+timeout = 30                   # Execution timeout (seconds)
+memory_limit = 536870912       # Memory limit (512MB)
+max_code_size = 102400         # Maximum code size (100KB)
+secure_mode = true             # Run in secure mode (restricted imports)
+show_traceback = true          # Show detailed tracebacks
+
+# File tool settings
+[file_tool]
+allow_write = true             # Allow file writing
+allow_delete = true            # Allow file deletion
+allow_read = true              # Allow file reading
+max_read_size = 10485760       # Maximum size to read (10MB)
+restricted_paths = ["/etc", "/var", "/usr"]  # Restricted paths
+backup_on_write = true         # Create backups when writing files
