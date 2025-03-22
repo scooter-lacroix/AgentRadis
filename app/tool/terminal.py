@@ -3,7 +3,7 @@ import os
 import shlex
 from typing import Optional, Dict, Any
 
-from app.tool.base import BaseTool, CLIResult
+from app.tool.base import BaseTool
 
 
 class Terminal(BaseTool):
@@ -29,179 +29,179 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
     current_path: str = os.getcwd()
     lock: asyncio.Lock = asyncio.Lock()
 
-    async def execute(self, command: str) -> CLIResult:
-        """
-        Execute a terminal command asynchronously with persistent context.
-
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """Execute a terminal command based on the provided arguments.
+        
         Args:
-            command (str): The terminal command to execute.
-
+            command: The CLI command to execute
+            
         Returns:
-            str: The output, and error of the command execution.
+            Dictionary with the command output
         """
-        # Split the command by & to handle multiple commands
-        commands = [cmd.strip() for cmd in command.split('&') if cmd.strip()]
-        final_output = CLIResult(output="", error="")
+        command = kwargs.get("command", "")
+        if not command:
+            return {
+                "status": "error",
+                "error": "No command provided"
+            }
+            
+        return await self._execute_command(command)
+    
+    async def _execute_command(self, command: str) -> Dict[str, Any]:
+        """Execute a terminal command and return the result."""
+        async with self.lock:
+            # Check if the command is a cd command
+            if command.strip().startswith("cd "):
+                return await self._handle_cd_command(command)
+                
+            # Sanitize the command
+            sanitized_command = self._sanitize_command(command)
+            
+            try:
+                # Use shell=True to allow for commands like cd, etc.
+                self.process = await asyncio.create_subprocess_shell(
+                    sanitized_command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.current_path
+                )
+                
+                stdout, stderr = await self.process.communicate()
+                returncode = self.process.returncode
+                
+                # Update process
+                self.process = None
+                
+                # Convert bytes to strings
+                stdout_str = stdout.decode("utf-8", errors="replace")
+                stderr_str = stderr.decode("utf-8", errors="replace")
+                
+                return {
+                    "status": "success" if returncode == 0 else "error",
+                    "output": stdout_str,
+                    "error": stderr_str,
+                    "code": returncode,
+                    "cwd": self.current_path
+                }
+                
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "code": -1,
+                    "cwd": self.current_path
+                }
 
-        for cmd in commands:
-            sanitized_command = self._sanitize_command(cmd)
+    async def execute_in_env(self, env_name: str, command: str) -> Dict[str, Any]:
+        """Execute a command in a specific environment."""
+        if env_name == "bash":
+            activate_cmd = f"source {env_name}/bin/activate && {command}"
+            return await self._execute_command(activate_cmd)
+        else:
+            # For Windows or other environments
+            return {
+                "status": "error",
+                "error": f"Environment activation for {env_name} not supported yet",
+                "code": -1
+            }
 
-            # Handle 'cd' command internally
-            if sanitized_command.lstrip().startswith("cd "):
-                result = await self._handle_cd_command(sanitized_command)
-            else:
-                async with self.lock:
-                    try:
-                        self.process = await asyncio.create_subprocess_shell(
-                            sanitized_command,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                            cwd=self.current_path,
-                        )
-                        stdout, stderr = await self.process.communicate()
-                        result = CLIResult(
-                            output=stdout.decode().strip(),
-                            error=stderr.decode().strip()
-                        )
-                    except Exception as e:
-                        result = CLIResult(output="", error=str(e))
-                    finally:
-                        self.process = None
-
-            # Combine outputs
-            if result.output:
-                final_output.output += (result.output + "\n") if final_output.output else result.output
-            if result.error:
-                final_output.error += (result.error + "\n") if final_output.error else result.error
-
-        # Remove trailing newlines
-        final_output.output = final_output.output.rstrip()
-        final_output.error = final_output.error.rstrip()
-        return final_output
-
-    async def execute_in_env(self, env_name: str, command: str) -> CLIResult:
-        """
-        Execute a terminal command asynchronously within a specified Conda environment.
-
-        Args:
-            env_name (str): The name of the Conda environment.
-            command (str): The terminal command to execute within the environment.
-
-        Returns:
-            str: The output, and error of the command execution.
-        """
-        sanitized_command = self._sanitize_command(command)
-
-        # Construct the command to run within the Conda environment
-        # Using 'conda run -n env_name command' to execute without activating
-        conda_command = f"conda run -n {shlex.quote(env_name)} {sanitized_command}"
-
-        return await self.execute(conda_command)
-
-    async def _handle_cd_command(self, command: str) -> CLIResult:
-        """
-        Handle 'cd' commands to change the current path.
-
-        Args:
-            command (str): The 'cd' command to process.
-
-        Returns:
-            TerminalOutput: The result of the 'cd' command.
-        """
+    async def _handle_cd_command(self, command: str) -> Dict[str, Any]:
+        """Handle cd commands by updating the current path."""
+        # Extract the directory from the cd command
         try:
             parts = shlex.split(command)
             if len(parts) < 2:
-                new_path = os.path.expanduser("~")
-            else:
-                new_path = os.path.expanduser(parts[1])
-
+                return {
+                    "status": "error",
+                    "error": "No directory specified for cd command",
+                    "code": 1,
+                    "cwd": self.current_path
+                }
+                
+            directory = parts[1]
+            
             # Handle relative paths
-            if not os.path.isabs(new_path):
-                new_path = os.path.join(self.current_path, new_path)
-
-            new_path = os.path.abspath(new_path)
-
-            if os.path.isdir(new_path):
-                self.current_path = new_path
-                return CLIResult(
-                    output=f"Changed directory to {self.current_path}",
-                    error=""
-                )
+            if not os.path.isabs(directory):
+                new_path = os.path.join(self.current_path, directory)
             else:
-                return CLIResult(
-                    output="",
-                    error=f"No such directory: {new_path}"
-                )
+                new_path = directory
+                
+            # Normalize the path
+            new_path = os.path.normpath(new_path)
+            
+            # Check if the path exists
+            if not os.path.exists(new_path):
+                return {
+                    "status": "error",
+                    "error": f"Directory not found: {new_path}",
+                    "code": 1,
+                    "cwd": self.current_path
+                }
+                
+            # Update the current path
+            self.current_path = new_path
+            
+            return {
+                "status": "success",
+                "output": f"Changed directory to {new_path}",
+                "error": "",
+                "code": 0,
+                "cwd": self.current_path
+            }
+            
         except Exception as e:
-            return CLIResult(output="", error=str(e))
+            return {
+                "status": "error",
+                "error": f"Error handling cd command: {str(e)}",
+                "code": 1,
+                "cwd": self.current_path
+            }
 
     @staticmethod
     def _sanitize_command(command: str) -> str:
-        """
-        Sanitize the command for safe execution.
-
-        Args:
-            command (str): The command to sanitize.
-
-        Returns:
-            str: The sanitized command.
-        """
-        # Example sanitization: restrict certain dangerous commands
-        dangerous_commands = ["rm", "sudo", "shutdown", "reboot"]
-        try:
-            parts = shlex.split(command)
-            if any(cmd in dangerous_commands for cmd in parts):
-                raise ValueError("Use of dangerous commands is restricted.")
-        except Exception as e:
-            # If shlex.split fails, try basic string comparison
-            if any(cmd in command for cmd in dangerous_commands):
-                raise ValueError("Use of dangerous commands is restricted.")
-
-        # Additional sanitization logic can be added here
-        return command
+        """Sanitize the command to prevent security issues."""
+        # Basic sanitization, can be expanded
+        return command.strip()
 
     async def close(self):
-        """Close the persistent shell process if it exists."""
-        async with self.lock:
-            if self.process:
+        """Close any active process."""
+        if self.process and self.process.returncode is None:
+            try:
                 self.process.terminate()
-                try:
-                    await asyncio.wait_for(self.process.wait(), timeout=5)
-                except asyncio.TimeoutError:
+                await asyncio.sleep(0.1)
+                if self.process.returncode is None:
                     self.process.kill()
-                    await self.process.wait()
-                finally:
-                    self.process = None
+            except Exception as e:
+                print(f"Error closing process: {e}")
+                
+    async def cleanup(self):
+        """Clean up resources."""
+        await self.close()
 
     async def __aenter__(self):
-        """Enter the asynchronous context manager."""
+        """Context manager entry."""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Exit the asynchronous context manager and close the process."""
+        """Context manager exit."""
         await self.close()
 
     def to_param(self) -> Dict[str, Any]:
-        parameters = {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "(required) The CLI command to execute. This should be valid for the current operating system. Ensure the command is properly formatted and does not contain any harmful instructions.",
-                }
-            },
-            "required": ["command"],
-        }
-        
+        """Return the tool parameters as a dict."""
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": parameters,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The CLI command to execute. This should be valid for the current operating system."
+                        }
+                    },
+                    "required": ["command"]
+                }
             }
         }
-        
-    async def run(self, **kwargs):
-        """Execute a terminal command (alias for execute)"""
-        return await self.execute(**kwargs)

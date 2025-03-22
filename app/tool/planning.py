@@ -1,9 +1,11 @@
 # tool/planning.py
-from typing import Dict, List, Literal, Optional
-import time
+import json
+import logging
+from typing import Dict, Any, List, Optional, Union
+import asyncio
 
-from app.exceptions import ToolError
-from app.tool.base import BaseTool, ToolResult
+from app.tool.base import BaseTool
+from app.logger import logger
 
 
 _PLANNING_TOOL_DESCRIPTION = """
@@ -67,21 +69,53 @@ class PlanningTool(BaseTool):
         "additionalProperties": False,
     }
 
-    def __init__(self):
+    def __init__(self, agent: Optional[Any] = None, **kwargs):
+        """Initialize the planning tool."""
+        super().__init__(**kwargs)
+        self.agent = agent
         self.plans = {}
         self.active_plan = None
 
-    async def run(self, command: str, **kwargs) -> str:
-        """Execute the planning tool command."""
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """
+        Create a plan for a given task.
+        
+        Args:
+            task: The task to create a plan for
+            max_steps: Maximum number of steps (default: 5)
+            
+        Returns:
+            Dictionary with the planning results
+        """
+        task = kwargs.get("task")
+        max_steps = int(kwargs.get("max_steps", 5))
+        
+        if not task:
+            return {
+                "status": "error",
+                "error": "No task provided"
+            }
+            
         try:
-            # Remove plan_id from kwargs if it's None
-            if "plan_id" in kwargs and kwargs["plan_id"] is None:
-                del kwargs["plan_id"]
+            if self.agent:
+                # Use the agent to generate a plan
+                plan = await self._generate_plan_with_agent(task, max_steps)
+            else:
+                # Create a basic plan without an agent
+                plan = self._create_basic_plan(task, max_steps)
                 
-            result = await self.execute(command=command, **kwargs)
-            return result.output
+            return {
+                "status": "success",
+                "task": task,
+                "plan": plan
+            }
+            
         except Exception as e:
-            raise Exception(f"Error executing planning tool command: {str(e)}")
+            logger.error(f"Error creating plan: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to create plan: {str(e)}"
+            }
 
     async def execute(
         self,
@@ -93,12 +127,12 @@ class PlanningTool(BaseTool):
         step_status: Optional[str] = None,
         step_notes: Optional[str] = None,
         **kwargs,
-    ) -> ToolResult:
+    ) -> Dict[str, Any]:
         """Execute a planning tool command."""
         try:
             if command == "create":
                 if not title:
-                    raise ToolError("Parameter `title` is required for command: create")
+                    raise ValueError("Parameter `title` is required for command: create")
                 return await self._create_plan(title=title, steps=steps)
             elif command == "update":
                 return await self._update_plan(title=title, steps=steps, plan_id=plan_id)
@@ -110,9 +144,9 @@ class PlanningTool(BaseTool):
                 return await self._set_active_plan(plan_id=plan_id)
             elif command == "mark_step":
                 if step_index is None:
-                    raise ToolError("Parameter `step_index` is required for command: mark_step")
+                    raise ValueError("Parameter `step_index` is required for command: mark_step")
                 if step_status is None:
-                    raise ToolError("Parameter `step_status` is required for command: mark_step")
+                    raise ValueError("Parameter `step_status` is required for command: mark_step")
                 return await self._mark_step(
                     step_index=step_index,
                     step_status=step_status,
@@ -122,44 +156,163 @@ class PlanningTool(BaseTool):
             elif command == "delete":
                 return await self._delete_plan(plan_id=plan_id)
             else:
-                raise ToolError(f"Unknown command: {command}")
+                raise ValueError(f"Unknown command: {command}")
         except Exception as e:
-            if isinstance(e, ToolError):
-                raise
-            raise ToolError(f"Error executing planning tool command: {str(e)}")
+            logger.error(f"Error executing planning tool command: {str(e)}")
+            return {
+                "status": "error",
+                "error": f"Failed to execute command: {command}"
+            }
 
-    async def _create_plan(self, title: str, steps: list = None, plan_id: str = None, **kwargs) -> ToolResult:
+    async def _generate_plan_with_agent(self, task: str, max_steps: int) -> List[Dict[str, str]]:
+        """
+        Generate a detailed plan using the agent.
+        
+        Args:
+            task: The task to plan for
+            max_steps: Maximum number of steps
+            
+        Returns:
+            List of plan steps
+        """
+        prompt = f"""
+        Create a plan for the following task: {task}
+        
+        The plan should:
+        1. Break down the task into at most {max_steps} logical steps
+        2. Be specific and actionable
+        3. Include necessary resources or prerequisites
+        
+        Format the response as a JSON array of steps:
+        [
+            {{"step": 1, "description": "First step description", "tools": ["tool1", "tool2"]}},
+            {{"step": 2, "description": "Second step description", "tools": ["tool3"]}}
+        ]
+        """
+        
+        if not self.agent:
+            raise ValueError("Agent not available for planning")
+            
+        # Use the agent to generate the plan
+        result = await self.agent.generate_content(prompt)
+        
+        # Extract JSON from the result
+        try:
+            # Find JSON content in the response
+            response_text = result.get("response", "")
+            json_start = response_text.find("[")
+            json_end = response_text.rfind("]") + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                json_str = response_text[json_start:json_end]
+                plan = json.loads(json_str)
+                
+                # Validate plan format
+                if not isinstance(plan, list):
+                    raise ValueError("Plan is not a list")
+                    
+                # Clean up and validate each step
+                cleaned_plan = []
+                for i, step in enumerate(plan):
+                    if not isinstance(step, dict):
+                        continue
+                        
+                    cleaned_step = {
+                        "step": i + 1,
+                        "description": step.get("description", ""),
+                        "tools": step.get("tools", [])
+                    }
+                    cleaned_plan.append(cleaned_step)
+                    
+                return cleaned_plan
+            else:
+                raise ValueError("Could not find JSON array in response")
+                
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON plan from agent response")
+            # Fall back to basic plan
+            return self._create_basic_plan(task, max_steps)
+            
+    def _create_basic_plan(self, task: str, max_steps: int) -> List[Dict[str, str]]:
+        """
+        Create a basic plan without using the agent.
+        
+        Args:
+            task: The task to plan for
+            max_steps: Maximum number of steps
+            
+        Returns:
+            List of plan steps
+        """
+        # For a simple plan, just break the task into generic steps
+        steps = [
+            {
+                "step": 1,
+                "description": f"Analyze the requirements for: {task}",
+                "tools": ["web_search"]
+            },
+            {
+                "step": 2, 
+                "description": "Gather necessary information and resources",
+                "tools": ["web_search", "file_tool"]
+            },
+            {
+                "step": 3,
+                "description": "Implement the core solution",
+                "tools": ["python_tool", "shell_tool"]
+            }
+        ]
+        
+        if max_steps > 3:
+            steps.append({
+                "step": 4,
+                "description": "Test and verify the solution",
+                "tools": ["python_tool", "shell_tool"]
+            })
+            
+        if max_steps > 4:
+            steps.append({
+                "step": 5,
+                "description": "Finalize and present the results",
+                "tools": ["file_tool"]
+            })
+            
+        return steps[:max_steps]
+
+    async def _create_plan(self, title: str, steps: list = None, plan_id: str = None, **kwargs) -> Dict[str, Any]:
         """Create a new plan."""
         if not plan_id:
-            plan_id = f"plan_{int(time.time())}"
+            plan_id = f"plan_{int(asyncio.get_event_loop().time())}"
             
         if plan_id in self.plans:
-            raise ToolError(f"A plan with ID '{plan_id}' already exists. Use 'update' to modify existing plans.")
+            raise ValueError(f"A plan with ID '{plan_id}' already exists. Use 'update' to modify existing plans.")
             
         plan = {
             "title": title,
             "steps": steps or [],
             "step_statuses": ["not_started"] * len(steps or []),
             "step_notes": [""] * len(steps or []),
-            "created_at": time.time()
+            "created_at": asyncio.get_event_loop().time()
         }
         
         self.plans[plan_id] = plan
         self.active_plan = plan_id
         
-        return ToolResult(
-            output=f"Created plan '{plan_id}':\n\n{self._format_plan(plan)}"
-        )
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan": plan
+        }
 
-    async def _update_plan(self, title: str = None, steps: list = None, plan_id: str = None, **kwargs) -> ToolResult:
+    async def _update_plan(self, title: str = None, steps: list = None, plan_id: str = None, **kwargs) -> Dict[str, Any]:
         """Update an existing plan."""
         if not plan_id:
             if not self.active_plan:
-                raise ToolError("No active plan. Please specify a plan_id or set an active plan.")
+                raise ValueError("No active plan. Please specify a plan_id or set an active plan.")
             plan_id = self.active_plan
             
         if plan_id not in self.plans:
-            raise ToolError(f"No plan found with ID: {plan_id}")
+            raise ValueError(f"No plan found with ID: {plan_id}")
             
         plan = self.plans[plan_id]
         if title:
@@ -169,16 +322,19 @@ class PlanningTool(BaseTool):
             plan["step_statuses"] = ["not_started"] * len(steps)
             plan["step_notes"] = [""] * len(steps)
             
-        return ToolResult(
-            output=f"Updated plan '{plan_id}':\n\n{self._format_plan(plan)}"
-        )
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan": plan
+        }
 
-    def _list_plans(self) -> ToolResult:
+    def _list_plans(self) -> Dict[str, Any]:
         """List all available plans."""
         if not self.plans:
-            return ToolResult(
-                output="No plans available. Create a plan with the 'create' command."
-            )
+            return {
+                "status": "success",
+                "message": "No plans available. Create a plan with the 'create' command."
+            }
 
         output = "Available plans:\n"
         for plan_id, plan in self.plans.items():
@@ -190,65 +346,76 @@ class PlanningTool(BaseTool):
             progress = f"{completed}/{total} steps completed"
             output += f"• {plan_id}{current_marker}: {plan['title']} - {progress}\n"
 
-        return ToolResult(output=output)
+        return {
+            "status": "success",
+            "message": output
+        }
 
-    def _get_plan(self, plan_id: Optional[str]) -> ToolResult:
+    def _get_plan(self, plan_id: Optional[str]) -> Dict[str, Any]:
         """Get details of a specific plan."""
         if not plan_id:
             # If no plan_id is provided, use the current active plan
             if not self.active_plan:
-                raise ToolError(
+                raise ValueError(
                     "No active plan. Please specify a plan_id or set an active plan."
                 )
             plan_id = self.active_plan
 
         if plan_id not in self.plans:
-            raise ToolError(f"No plan found with ID: {plan_id}")
+            raise ValueError(f"No plan found with ID: {plan_id}")
 
         plan = self.plans[plan_id]
-        return ToolResult(output=self._format_plan(plan))
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan": plan
+        }
 
-    def _set_active_plan(self, plan_id: Optional[str]) -> ToolResult:
+    def _set_active_plan(self, plan_id: Optional[str]) -> Dict[str, Any]:
         """Set a plan as the active plan."""
         if not plan_id:
-            raise ToolError("Parameter `plan_id` is required for command: set_active")
+            raise ValueError("Parameter `plan_id` is required for command: set_active")
 
         if plan_id not in self.plans:
-            raise ToolError(f"No plan found with ID: {plan_id}")
+            raise ValueError(f"No plan found with ID: {plan_id}")
 
         self.active_plan = plan_id
-        return ToolResult(
-            output=f"Plan '{plan_id}' is now the active plan.\n\n{self._format_plan(self.plans[plan_id])}"
-        )
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan": self.plans[plan_id]
+        }
 
-    async def _mark_step(self, step_index: int, step_status: str, plan_id: str = None, step_notes: str = "", **kwargs) -> ToolResult:
+    async def _mark_step(self, step_index: int, step_status: str, plan_id: str = None, step_notes: str = "", **kwargs) -> Dict[str, Any]:
         """Mark a step in a plan with a specific status."""
         if not plan_id:
             if not self.active_plan:
-                raise ToolError("No active plan. Please specify a plan_id or set an active plan.")
+                raise ValueError("No active plan. Please specify a plan_id or set an active plan.")
             plan_id = self.active_plan
             
         if plan_id not in self.plans:
-            raise ToolError(f"No plan found with ID: {plan_id}")
+            raise ValueError(f"No plan found with ID: {plan_id}")
             
         plan = self.plans[plan_id]
         if step_index < 0 or step_index >= len(plan["steps"]):
-            raise ToolError(f"Invalid step index: {step_index}")
+            raise ValueError(f"Invalid step index: {step_index}")
             
         plan["step_statuses"][step_index] = step_status
         plan["step_notes"][step_index] = step_notes
         
-        return ToolResult(
-            output=f"Updated step {step_index} in plan '{plan_id}':\n\n{self._format_plan(plan)}"
-        )
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan": plan
+        }
 
-    def _delete_plan(self, plan_id: Optional[str]) -> ToolResult:
+    def _delete_plan(self, plan_id: Optional[str]) -> Dict[str, Any]:
         """Delete a plan."""
         if not plan_id:
-            raise ToolError("Parameter `plan_id` is required for command: delete")
+            raise ValueError("Parameter `plan_id` is required for command: delete")
 
         if plan_id not in self.plans:
-            raise ToolError(f"No plan found with ID: {plan_id}")
+            raise ValueError(f"No plan found with ID: {plan_id}")
 
         del self.plans[plan_id]
 
@@ -256,7 +423,11 @@ class PlanningTool(BaseTool):
         if self.active_plan == plan_id:
             self.active_plan = None
 
-        return ToolResult(output=f"Plan '{plan_id}' has been deleted.")
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "message": f"Plan '{plan_id}' has been deleted."
+        }
 
     def _format_plan(self, plan: Dict) -> str:
         """Format a plan for display."""

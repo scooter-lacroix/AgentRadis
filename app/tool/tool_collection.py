@@ -1,122 +1,197 @@
-"""Collection classes for managing multiple tools."""
-from typing import Any, Dict, List, Optional, Set, Type, Union
+"""
+Tool collection for managing groups of tools.
+"""
+from typing import Any, Dict, List, Optional, Union, Callable
+import inspect
+import json
 
-from app.exceptions import ToolError
-from app.tool.base import BaseTool, ToolFailure, ToolResult
 from app.logger import logger
-
+from app.tool.base import BaseTool
 
 class ToolCollection:
-    """A collection of defined tools."""
-
-    def __init__(self, *tools: BaseTool):
-        self.tools = tools
-        self.tool_map = {tool.name: tool for tool in tools}
-
-    def __iter__(self):
-        return iter(self.tools)
-
-    def to_params(self) -> List[Dict[str, Any]]:
-        return [tool.to_param() for tool in self.tools]
-
-    async def execute(self, name: str, **kwargs) -> Any:
+    """
+    Collection for managing and accessing multiple tools.
+    
+    The ToolCollection provides a way to manage a group of tools and
+    access them by name or other properties.
+    """
+    
+    def __init__(self, *args):
         """
-        Execute a tool by name with the given keyword arguments.
+        Initialize the tool collection with provided tools.
         
         Args:
-            name: Name of the tool
-            **kwargs: Arguments for the tool
+            *args: Tools to include in the collection
+        """
+        self.tools = {}
+        
+        # Add all provided tools
+        for tool in args:
+            if isinstance(tool, BaseTool):
+                self.add(tool)
+            else:
+                logger.warning(f"Skipping non-tool object: {tool}")
+    
+    def add(self, tool: BaseTool) -> None:
+        """
+        Add a tool to the collection.
+        
+        Args:
+            tool: The tool instance to add
+        """
+        if not isinstance(tool, BaseTool):
+            raise TypeError(f"Expected BaseTool instance, got {type(tool)}")
+            
+        name = tool.name
+        self.tools[name] = tool
+        logger.debug(f"Added tool '{name}' to collection")
+    
+    def remove(self, name: str) -> None:
+        """
+        Remove a tool from the collection.
+        
+        Args:
+            name: The name of the tool to remove
+        """
+        if name in self.tools:
+            del self.tools[name]
+            logger.debug(f"Removed tool '{name}' from collection")
+    
+    def get(self, name: str) -> Optional[BaseTool]:
+        """
+        Get a tool by name.
+        
+        Args:
+            name: The name of the tool to retrieve
             
         Returns:
-            Tool execution result
-            
-        Raises:
-            KeyError: If the tool doesn't exist
-            Exception: Any error from the tool execution
+            The tool instance or None if not found
         """
-        # Get the tool
+        return self.tools.get(name)
+    
+    def get_all(self) -> Dict[str, BaseTool]:
+        """
+        Get all tools in the collection.
+        
+        Returns:
+            Dictionary of tool names to tool instances
+        """
+        return self.tools.copy()
+    
+    def filter(self, predicate: Callable[[BaseTool], bool]) -> "ToolCollection":
+        """
+        Filter tools based on a predicate function.
+        
+        Args:
+            predicate: Function that returns True for tools to include
+            
+        Returns:
+            New ToolCollection with filtered tools
+        """
+        new_collection = ToolCollection()
+        for tool in self.tools.values():
+            if predicate(tool):
+                new_collection.add(tool)
+        return new_collection
+    
+    def list_names(self) -> List[str]:
+        """
+        Get the names of all tools in the collection.
+        
+        Returns:
+            List of tool names
+        """
+        return list(self.tools.keys())
+    
+    def list_tools_with_params(self) -> List[Dict[str, Any]]:
+        """
+        Get list of tools with their parameters for function calling.
+        
+        Returns:
+            List of tool definitions in function calling format
+        """
+        result = []
+        for tool in self.tools.values():
+            tool_def = {
+                "name": tool.name,
+                "description": tool.description.strip(),
+                "parameters": tool.parameters
+            }
+            result.append(tool_def)
+        return result
+    
+    def to_params(self) -> List[Dict[str, Any]]:
+        """
+        Get list of tools with their parameters in the format expected by LLMs.
+        This returns tools in the OpenAI function calling format.
+        
+        Returns:
+            List of tool definitions in function calling format
+        """
+        result = []
+        for tool in self.tools.values():
+            if hasattr(tool, 'to_param') and callable(tool.to_param):
+                result.append(tool.to_param())
+            else:
+                # Fallback to constructing it manually
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description.strip(),
+                        "parameters": tool.parameters
+                    }
+                }
+                result.append(tool_def)
+        return result
+    
+    async def execute_tool(self, name: str, **kwargs) -> Dict[str, Any]:
+        """
+        Execute a tool by name with the provided parameters.
+        
+        Args:
+            name: The name of the tool to execute
+            **kwargs: Parameters for the tool
+            
+        Returns:
+            Dictionary with the results or error
+        """
         tool = self.get(name)
         if not tool:
-            raise KeyError(f"Tool '{name}' not found in collection")
-        
-        # Resolve aliases
-        if hasattr(tool, 'aliases') and name in tool.aliases:
-            # If using an alias, update the name for the logging
-            actual_name = tool.name
-            logger.info(f"Tool alias '{name}' resolved to '{actual_name}'")
-        
-        # Execute the tool
-        try:
-            # First try the 'run' method (modern interface)
-            if hasattr(tool, 'run') and callable(tool.run):
-                result = await tool.run(**kwargs)
-            # Fallback to execute method
-            elif hasattr(tool, 'execute') and callable(tool.execute):
-                result = await tool.execute(**kwargs)
-            # Last resort - call directly
-            else:
-                result = await tool(**kwargs)
-                
-            # Ensure the result is a proper tool result
-            from app.schema import ToolResult as SchemaToolResult
-            if isinstance(result, SchemaToolResult):
-                return result
-                
-            # If it's a dict, try to convert to ToolResult
-            if isinstance(result, dict) and 'status' in result:
-                try:
-                    return SchemaToolResult(
-                        tool=name,
-                        action=name,
-                        status=result.get('status', 'SUCCESS'),
-                        result=result
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to convert dict to ToolResult: {e}")
-                    
-            # For any other result, create a basic success result
-            return SchemaToolResult(
-                tool=name,
-                action=name,
-                status="SUCCESS",
-                result={"result": str(result)} if result is not None else {"result": "No result"}
-            )
+            return {
+                "status": "error",
+                "error": f"Tool not found: {name}"
+            }
             
+        try:
+            logger.info(f"Executing tool: {name}")
+            result = await tool.run(**kwargs)
+            return result
         except Exception as e:
-            logger.error(f"Error executing tool '{name}': {e}")
-            # Create an error result
-            from app.schema import ToolResult as SchemaToolResult
-            return SchemaToolResult(
-                tool=name,
-                action=name,
-                status="ERROR",
-                result={"error": str(e)}
-            )
-
-    async def execute_all(self) -> List[ToolResult]:
-        """Execute all tools in the collection sequentially."""
-        results = []
-        for tool in self.tools:
-            try:
-                result = await tool()
-                results.append(result)
-            except ToolError as e:
-                results.append(ToolFailure(error=e.message))
-        return results
-
-    def get_tool(self, name: str) -> BaseTool:
-        return self.tool_map.get(name)
-
-    def add_tool(self, tool: BaseTool):
-        self.tools += (tool,)
-        self.tool_map[tool.name] = tool
-        return self
-
-    def add_tools(self, *tools: BaseTool):
-        for tool in tools:
-            self.add_tool(tool)
-        return self
-
-    def get_tools(self) -> Dict[str, BaseTool]:
-        """Get a dictionary of tools with their names as keys."""
-        return self.tool_map
+            logger.error(f"Error executing tool {name}: {e}")
+            return {
+                "status": "error",
+                "error": f"Tool execution failed: {str(e)}"
+            }
+    
+    def __contains__(self, name: str) -> bool:
+        """Check if a tool with the given name is in the collection."""
+        return name in self.tools
+    
+    def __getitem__(self, name: str) -> BaseTool:
+        """Get a tool by name using dictionary syntax."""
+        if name not in self.tools:
+            raise KeyError(f"Tool not found: {name}")
+        return self.tools[name]
+    
+    def __iter__(self):
+        """Iterate through the tools in the collection."""
+        return iter(self.tools.values())
+    
+    def __len__(self) -> int:
+        """Get the number of tools in the collection."""
+        return len(self.tools)
+    
+    def __repr__(self) -> str:
+        """String representation of the tool collection."""
+        return f"ToolCollection({', '.join(self.tools.keys())})" 

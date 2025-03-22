@@ -1,0 +1,528 @@
+<html>
+<head>
+    <title>OpenManus Interface</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        #connection-panel { background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        #connection-input { width: 300px; padding: 10px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        #connect-btn { padding: 10px 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        #connect-btn:hover { background-color: #3e8e41; }
+        #status-indicator { display: inline-block; margin-left: 15px; padding: 5px 10px; border-radius: 4px; }
+        .disconnected { background-color: #ffcdd2; color: #b71c1c; }
+        .connected { background-color: #c8e6c9; color: #2e7d32; }
+        
+        #chat-container { height: 400px; overflow-y: auto; margin-top: 20px; padding: 15px; background-color: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .message { margin-bottom: 15px; padding: 10px; border-radius: 8px; max-width: 80%; position: relative; }
+        .user-message { background-color: #e3f2fd; margin-left: auto; }
+        .bot-message { background-color: #f5f5f5; margin-right: auto; }
+        .tool-message { background-color: #fff3e0; border-left: 3px solid #ff9800; margin-right: auto; }
+        .error-message { background-color: #ffebee; border-left: 3px solid #f44336; }
+        .system-message { background-color: #e8f5e9; border-left: 3px solid #4caf50; font-style: italic; }
+        .thinking-indicator { display: flex; align-items: center; background-color: #f1f1f1; padding: 10px; border-radius: 8px; }
+        .thinking-dots { display: flex; margin-left: 8px; }
+        .thinking-dot { height: 8px; width: 8px; margin: 0 2px; background-color: #555; border-radius: 50%; animation: thinking 1.4s infinite ease-in-out both; }
+        .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+        .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes thinking { 
+            0%, 80%, 100% { transform: scale(0); } 
+            40% { transform: scale(1); } 
+        }
+        
+        #input-container { margin-top: 20px; display: flex; align-items: center; }
+        #message-input { flex-grow: 1; padding: 12px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 12px 20px; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; transition: background-color 0.3s; }
+        .btn-primary { background-color: #4CAF50; }
+        .btn-primary:hover { background-color: #3e8e41; }
+        .btn-secondary { background-color: #2196F3; }
+        .btn-secondary:hover { background-color: #0b7dda; }
+        .btn-disabled { background-color: #cccccc; cursor: not-allowed; }
+        
+        #file-explorer { margin-top: 20px; background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        #file-list { list-style-type: none; padding: 0; }
+        #file-list li { padding: 8px; border-bottom: 1px solid #eee; }
+        #file-list li:hover { background-color: #f5f5f5; }
+        
+        .tool-indicator { display: inline-block; padding: 2px 6px; border-radius: 4px; background-color: #e0e0e0; margin-right: 5px; font-size: 0.8em; }
+        
+        code, pre { background-color: #f6f8fa; padding: 2px 5px; border-radius: 3px; font-family: 'Consolas', 'Monaco', monospace; white-space: pre-wrap; }
+        pre { padding: 10px; max-height: 200px; overflow: auto; }
+        
+        .save-indicator { display: none; background-color: #4CAF50; color: white; padding: 5px 10px; position: fixed; top: 20px; right: 20px; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); animation: fadeOut 2s forwards; animation-delay: 3s; }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        
+        #tools-panel { margin-top: 20px; background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .tool-badge { display: inline-block; padding: 5px 10px; margin: 5px; border-radius: 4px; background-color: #e8f5e9; }
+        .tool-badge-active { background-color: #c8e6c9; border: 1px solid #4caf50; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenManus Interface</h1>
+        
+        <!-- Connection Panel -->
+        <div id="connection-panel">
+            <input type="text" id="connection-input" placeholder="Enter OpenManus host URL" value="http://localhost:5000" />
+            <button id="connect-btn" class="btn btn-primary">Connect</button>
+            <div id="status-indicator" class="disconnected">Disconnected</div>
+        </div>
+
+        <!-- Tools Panel -->
+        <div id="tools-panel">
+            <h3>Available Tools</h3>
+            <div id="tools-list">Loading tools...</div>
+        </div>
+
+        <!-- Chat Section -->
+        <div id="chat-container"></div>
+        
+        <!-- Input Section -->
+        <div id="input-container">
+            <input type="text" id="message-input" placeholder="Type your message or command here..." />
+            <button id="send-btn" class="btn btn-primary">Send</button>
+            <button id="upload-btn" class="btn btn-secondary">Upload Files</button>
+            <button id="clear-btn" class="btn btn-secondary">Clear Chat</button>
+        </div>
+
+        <!-- File Explorer -->
+        <div id="file-explorer">
+            <h3>Saved Files</h3>
+            <ul id="file-list"></ul>
+        </div>
+        
+        <!-- Save Indicator -->
+        <div id="save-indicator" class="save-indicator">File saved successfully!</div>
+    </div>
+
+    <script>
+        // Global state
+        const state = {
+            connected: false,
+            host: '',
+            fileList: [],
+            tools: [],
+            thinking: false,
+            requestId: 0
+        };
+        
+        // Connection Handling
+        async function connect() {
+            const host = document.getElementById('connection-input').value.trim();
+            if (!host) {
+                showError("Please enter a valid host URL");
+                return;
+            }
+            
+            state.host = host;
+            
+            try {
+                // Try to connect to the server
+                displaySystemMessage("Connecting to server...");
+                
+                // Test connection with a health check
+                const response = await fetch(`${host}/health`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 5000
+                }).catch(err => {
+                    throw new Error("Failed to connect to server");
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Server returned status: ${response.status}`);
+                }
+                
+                // Mark as connected
+                updateConnectionStatus('connected');
+                
+                // Fetch available tools
+                fetchTools();
+                
+                // Add welcome message
+                displaySystemMessage("Connected to OpenManus. Type a query or command to get started.");
+            } catch (error) {
+                showError(`Connection failed: ${error.message}`);
+                updateConnectionStatus('disconnected');
+            }
+        }
+        
+        function updateConnectionStatus(status) {
+            const indicator = document.getElementById('status-indicator');
+            const sendButton = document.getElementById('send-btn');
+            
+            if (status === 'connected') {
+                indicator.className = 'connected';
+                indicator.textContent = 'Connected';
+                state.connected = true;
+                document.getElementById('connect-btn').textContent = 'Reconnect';
+                sendButton.classList.remove('btn-disabled');
+                sendButton.removeAttribute('disabled');
+            } else {
+                indicator.className = 'disconnected';
+                indicator.textContent = 'Disconnected';
+                state.connected = false;
+                document.getElementById('connect-btn').textContent = 'Connect';
+                sendButton.classList.add('btn-disabled');
+                sendButton.setAttribute('disabled', 'disabled');
+            }
+        }
+        
+        // Tools Handling
+        async function fetchTools() {
+            try {
+                // In a real implementation, fetch tools from server
+                // For now, use predefined set
+                state.tools = [
+                    { name: 'file_saver', description: 'Save content to a file', active: false },
+                    { name: 'web_search', description: 'Search the web for information', active: false },
+                    { name: 'python_execute', description: 'Execute Python code', active: false },
+                    { name: 'browser_use', description: 'Navigate and extract data from websites', active: false },
+                    { name: 'terminate', description: 'End the current task', active: false }
+                ];
+                
+                // Display tools
+                updateToolsDisplay();
+            } catch (error) {
+                showError(`Failed to fetch tools: ${error.message}`);
+            }
+        }
+        
+        function updateToolsDisplay() {
+            const toolsList = document.getElementById('tools-list');
+            if (state.tools.length === 0) {
+                toolsList.innerHTML = 'No tools available';
+                return;
+            }
+            
+            toolsList.innerHTML = state.tools.map(tool => 
+                `<div class="tool-badge ${tool.active ? 'tool-badge-active' : ''}" data-tool="${tool.name}">
+                    ${tool.name}
+                </div>`
+            ).join('');
+        }
+        
+        function updateToolStatus(toolName, active) {
+            // Update tool status in state
+            const tool = state.tools.find(t => t.name === toolName);
+            if (tool) {
+                tool.active = active;
+                
+                // Update display
+                updateToolsDisplay();
+            }
+        }
+
+        // Chat Functions
+        async function sendMessage() {
+            if (!state.connected) {
+                showError("Please connect to OpenManus first");
+                return;
+            }
+            
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message) {
+                return;
+            }
+            
+            // Display user message
+            displayMessage(message, 'user');
+            input.value = '';
+            
+            // Disable send button during processing
+            const sendButton = document.getElementById('send-btn');
+            sendButton.classList.add('btn-disabled');
+            sendButton.setAttribute('disabled', 'disabled');
+            
+            // Show thinking indicator
+            showThinkingIndicator();
+            
+            // Unique ID for this request
+            const requestId = ++state.requestId;
+            
+            try {
+                // Send message to server
+                const response = await fetch(`${state.host}/api/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ prompt: message })
+                });
+                
+                // Check if this is still the current request
+                if (requestId !== state.requestId) {
+                    return; // A newer request has been made
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`Server returned status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Process response
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    // Check for tools used
+                    const toolsUsed = data.tools_used || [];
+                    
+                    // Reset all tool indicators
+                    state.tools.forEach(tool => tool.active = false);
+                    
+                    // Update active tools
+                    toolsUsed.forEach(toolName => {
+                        updateToolStatus(toolName, true);
+                    });
+                    
+                    // Display tool messages if any
+                    if (data.tool_results && data.tool_results.length > 0) {
+                        data.tool_results.forEach(result => {
+                            displayToolMessage(result.output || result.message, result.name || 'tool');
+                        });
+                    }
+                    
+                    // Display final response
+                    displayMessage(data.response, 'bot');
+                    
+                    // Check for saved files
+                    if (data.saved_files && data.saved_files.length > 0) {
+                        data.saved_files.forEach(file => {
+                            addFileToList(file);
+                            showSaveIndicator();
+                        });
+                    }
+                }
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+            } finally {
+                // Hide thinking indicator
+                hideThinkingIndicator();
+                
+                // Re-enable send button
+                sendButton.classList.remove('btn-disabled');
+                sendButton.removeAttribute('disabled');
+            }
+        }
+        
+        // For demo and testing - simulates a backend response
+        async function processMessageSimulated(message) {
+            // Simulate network delay
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Determine response based on message
+            if (message.toLowerCase().includes('save') || message.toLowerCase().includes('write')) {
+                // Simulate file save flow
+                updateToolStatus('file_saver', true);
+                displayToolMessage("Saving content to file...", 'file_saver');
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const fileName = "example_file.txt";
+                addFileToList(fileName);
+                showSaveIndicator();
+                
+                displayToolMessage(`Successfully saved data to ${fileName}`, 'file_saver');
+                displayMessage("I've saved the content to a file as requested.", 'bot');
+            } 
+            else if (message.toLowerCase().includes('search')) {
+                // Simulate search flow
+                updateToolStatus('web_search', true);
+                displayToolMessage("Searching the web for information...", 'web_search');
+                
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                displayToolMessage("Found relevant information on the web.", 'web_search');
+                displayMessage("Here are the search results based on your query...", 'bot');
+            }
+            else if (message.toLowerCase().includes('python') || message.toLowerCase().includes('code')) {
+                // Simulate Python execution
+                updateToolStatus('python_execute', true);
+                displayToolMessage("Executing Python code...", 'python_execute');
+                
+                await new Promise(resolve => setTimeout(resolve, 1200));
+                
+                const code = "def hello_world():\n    print('Hello, world!')\n\nhello_world()";
+                displayToolMessage("Code execution result:\n```python\n" + code + "\n```\nOutput: Hello, world!", 'python_execute');
+                displayMessage("I've executed the Python code for you and got the result shown above.", 'bot');
+            }
+            else {
+                // Regular response
+                displayMessage("I've processed your request: " + message, 'bot');
+            }
+        }
+        
+        function showThinkingIndicator() {
+            state.thinking = true;
+            const chatContainer = document.getElementById('chat-container');
+            const thinkingDiv = document.createElement('div');
+            thinkingDiv.id = 'thinking-indicator';
+            thinkingDiv.className = 'thinking-indicator';
+            thinkingDiv.innerHTML = `
+                <span>OpenManus is thinking</span>
+                <div class="thinking-dots">
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                </div>
+            `;
+            chatContainer.appendChild(thinkingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        function hideThinkingIndicator() {
+            state.thinking = false;
+            const thinkingIndicator = document.getElementById('thinking-indicator');
+            if (thinkingIndicator) {
+                thinkingIndicator.remove();
+            }
+        }
+        
+        function showSaveIndicator() {
+            const indicator = document.getElementById('save-indicator');
+            indicator.style.display = 'block';
+            // Reset animation
+            indicator.style.animation = 'none';
+            void indicator.offsetWidth; // Trigger reflow
+            indicator.style.animation = 'fadeOut 2s forwards';
+            indicator.style.animationDelay = '3s';
+            
+            // Hide after animation
+            setTimeout(() => {
+                indicator.style.display = 'none';
+            }, 5000);
+        }
+        
+        function showError(message) {
+            const chatContainer = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message error-message';
+            messageDiv.innerHTML = `<strong>Error:</strong> ${message}`;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        function displaySystemMessage(text) {
+            const chatContainer = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message system-message';
+            messageDiv.textContent = text;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function displayMessage(text, sender) {
+            const chatContainer = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + (sender === 'user' ? 'user-message' : 'bot-message');
+            
+            // Format the message with proper code highlighting
+            const formattedText = formatMessage(text);
+            
+            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'OpenManus'}:</strong> ${formattedText}`;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        function displayToolMessage(text, toolName) {
+            const chatContainer = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message tool-message';
+            
+            // Format the message with proper code highlighting
+            const formattedText = formatMessage(text);
+            
+            messageDiv.innerHTML = `<span class="tool-indicator">${toolName}</span> ${formattedText}`;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            // Highlight the active tool
+            updateToolStatus(toolName, true);
+        }
+        
+        function formatMessage(text) {
+            if (!text) return '';
+            
+            // Convert code blocks
+            const codeBlockRegex = /```([a-z]*)\n([\s\S]*?)\n```/g;
+            let formattedText = text.replace(codeBlockRegex, '<pre><code>$2</code></pre>');
+            
+            // Convert inline code
+            const inlineCodeRegex = /`([^`]+)`/g;
+            formattedText = formattedText.replace(inlineCodeRegex, '<code>$1</code>');
+            
+            // Handle line breaks
+            formattedText = formattedText.replace(/\n/g, '<br>');
+            
+            return formattedText;
+        }
+
+        // File Handling
+        function uploadFiles() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    // In a real implementation, upload to server
+                    displayFile(file);
+                    displaySystemMessage(`Uploaded file: ${file.name}`);
+                }
+            };
+            input.click();
+        }
+
+        function displayFile(file) {
+            addFileToList(file.name);
+        }
+        
+        function addFileToList(fileName) {
+            // Don't add duplicates
+            if (state.fileList.includes(fileName)) {
+                return;
+            }
+            
+            state.fileList.push(fileName);
+            
+            const fileList = document.getElementById('file-list');
+            const li = document.createElement('li');
+            li.textContent = fileName;
+            fileList.appendChild(li);
+        }
+        
+        function clearChat() {
+            document.getElementById('chat-container').innerHTML = '';
+            displaySystemMessage('Chat cleared');
+            
+            // Reset tools to inactive
+            state.tools.forEach(tool => tool.active = false);
+            updateToolsDisplay();
+        }
+        
+        // Initialize event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('connect-btn').addEventListener('click', connect);
+            document.getElementById('send-btn').addEventListener('click', sendMessage);
+            document.getElementById('upload-btn').addEventListener('click', uploadFiles);
+            document.getElementById('clear-btn').addEventListener('click', clearChat);
+            
+            // Allow enter key to send message
+            document.getElementById('message-input').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+            
+            // Initially disable send button
+            const sendButton = document.getElementById('send-btn');
+            sendButton.classList.add('btn-disabled');
+            sendButton.setAttribute('disabled', 'disabled');
+            
+            // Display welcome message
+            displaySystemMessage("Welcome to OpenManus Interface. Please connect to a server to begin.");
+        });
+    </script>
+</html>

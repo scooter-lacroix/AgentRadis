@@ -1,38 +1,49 @@
 """
-Radis Agent Module
-
-This module provides the Radis agent, a versatile agent capable of
-handling complex tasks through tool usage and reasoning.
+Radis - Robust AI Development & Integration System
 """
 
-from typing import Dict, List, Optional, Any
-import asyncio
-import json
-import time
-import traceback
 import os
-from datetime import datetime
+import json
+import re
+import uuid
+import time
+import inspect
+import textwrap
+import subprocess
+import tempfile
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from pydantic import Field, create_model, validator
+import asyncio
+import aiohttp
+import numpy as np
+import importlib
+import pkgutil
+import sys
+from functools import partial
 from pathlib import Path
-import importlib.util
+from datetime import datetime
+import yaml
 import logging
-import pytz
 
 from app.agent.base import BaseAgent
-from app.schema import AgentMemory, Message, Role, AgentState, ToolChoice
+from app.agent.react import ReActAgent
 from app.logger import logger
+from app.schema import AgentState, Message
+from app.llm import LLM, create_llm
+from app.tool.python_tool import PythonTool
+from app.tool.file_tool import FileTool
+from app.tool.shell_tool import ShellTool
+from app.tool.bash import Bash
+from app.tool.web_tool import WebTool
+from app.tool.speech_tool import SpeechTool
+from app.tool.file_saver import FileSaver
+from app.schema import AgentMemory, Role, ToolChoice
 from app.tool.base import BaseTool
 from app.tool.web_search import WebSearch
-from app.tool.file_saver import FileSaver
 from app.tool.terminal import Terminal
-from app.tool.bash import Bash
-from app.tool.python_execute import PythonExecute
-from app.tool.browser_use_tool import BrowserUseTool
 from app.tool.terminate import Terminate
-from app.tool.mcp_installer import MCPInstaller
 from app.tool.sudo_tool import SudoTool
-from app.tool.file_handler import FileHandler
 from app.config import config
-from app.utils.sudo import run_sudo_command, clear_sudo_cache
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +102,10 @@ class Radis(BaseAgent):
                 FileSaver(),
                 Terminal(),
                 Bash(),
-                PythonExecute(),
-                BrowserUseTool(),
+                PythonTool(),
+                WebTool(),
                 Terminate(),
-                FileHandler(),
-                SudoTool(sudo_command=run_sudo_command)
+                SudoTool()
             ]
             
             for tool in basic_tools:
@@ -105,15 +115,6 @@ class Radis(BaseAgent):
                 except Exception as e:
                     logger.error(f"Error initializing {tool.__class__.__name__}: {str(e)}")
                     continue
-            
-            # Load MCP servers
-            try:
-                mcp_installer = MCPInstaller()
-                self.tools.append(mcp_installer)
-                logger.info("Added MCP installer tool")
-                self._load_mcp_servers()
-            except Exception as e:
-                logger.error(f"Failed to initialize MCP installer: {e}")
             
             logger.info(f"Initialized {len(self.tools)} tools")
             
@@ -500,7 +501,6 @@ class Radis(BaseAgent):
         except Exception as e:
             error_message = f"Error executing tool {tool_name}: {str(e)}"
             logger.error(error_message)
-            traceback.print_exc()
 
             # Add error message to memory
             self.memory.messages.append(Message(
@@ -819,7 +819,6 @@ class Radis(BaseAgent):
 
     def cleanup(self):
         """Cleanup resources"""
-        clear_sudo_cache()
         super().cleanup()
 
     def get_tools_for_llm(self) -> List[Dict[str, Any]]:

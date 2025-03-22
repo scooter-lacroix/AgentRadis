@@ -1,92 +1,176 @@
 import os
-import aiofiles
-from app.tool.base import BaseTool, ToolResult, ToolFailure
-from pathlib import Path
-import platform
-from typing import ClassVar, Optional
-import logging
+import json
+import base64
+from typing import Dict, Any, Optional, List, Union
 
-# Define default save directories for each platform
-DEFAULT_SAVE_DIRS = {
-    "Windows": os.path.expanduser("~/Documents/AgentRadis_Saves"),
-    "Linux": os.path.expanduser("~/AgentRadis_Saves"),
-    "Darwin": os.path.expanduser("~/Library/AgentRadis_Saves")
-}
+from app.tool.base import BaseTool
+from app.logger import logger
 
 class FileSaver(BaseTool):
-    DEFAULT_SAVE_DIR: ClassVar[str] = DEFAULT_SAVE_DIRS.get(platform.system(), "./saved_files")
-
-    name: str = "file_saver"
-    description: str = """Save content to a file. 
-Files are stored in user-specific locations by default but can save to specified paths with proper permissions.
-Use this tool to save code, text, or data to a file on the user's system."""
-
-    parameters: dict = {
+    """Tool for saving files to the local system."""
+    
+    name = "file_saver"
+    description = """
+    Save files to the local filesystem.
+    This tool can save text content, binary data (base64-encoded), and JSON data to files.
+    It will create directories in the path if they don't exist.
+    """
+    parameters = {
         "type": "object",
         "properties": {
-            "content": {"type": "string", "description": "Content to save to the file"},
-            "file_path": {"type": "string", "description": "Path to save the file (relative or absolute)"},
-            "mode": {"type": "string", "enum": ["w", "a"], "default": "w", "description": "Write mode: 'w' to overwrite, 'a' to append"},
-            "create_dirs": {"type": "boolean", "default": True, "description": "Create parent directories if they don't exist"}
+            "path": {
+                "type": "string",
+                "description": "The path where the file should be saved (relative to the working directory)"
+            },
+            "content": {
+                "type": "string",
+                "description": "The content to save to the file"
+            },
+            "format": {
+                "type": "string",
+                "enum": ["text", "binary", "json"],
+                "description": "The format of the content: text (default), binary (base64-encoded), or json"
+            },
+            "append": {
+                "type": "boolean",
+                "description": "Whether to append to the file instead of overwriting it"
+            }
         },
-        "required": ["content", "file_path"]
+        "required": ["path", "content"]
     }
-
-    async def execute(self, 
-                     content: str, 
-                     file_path: str, 
-                     mode: str = "w", 
-                     create_dirs: bool = True) -> str:
+    
+    async def run(self, **kwargs) -> Dict[str, Any]:
         """
-        Save content to a file with proper error handling and directory creation.
+        Save a file to the local filesystem.
         
         Args:
-            content: Text content to save
-            file_path: Target file path (relative or absolute)
-            mode: File open mode ('w' for write, 'a' for append)
-            create_dirs: Whether to create parent directories
+            path: Path where the file should be saved
+            content: Content to save
+            format: Format of the content (text, binary, json)
+            append: Whether to append to the file
             
         Returns:
-            Success or error message
+            Dictionary with the result of the operation
         """
-        # Determine the full path
+        path = kwargs.get("path")
+        content = kwargs.get("content", "")
+        format_type = kwargs.get("format", "text").lower()
+        append = kwargs.get("append", False)
+        
+        if not path:
+            return {
+                "status": "error",
+                "error": "No path provided"
+            }
+            
         try:
-            # Check if absolute path
-            if os.path.isabs(file_path):
-                full_path = Path(file_path)
-            else:
-                # Use default directory for relative paths
-                full_path = Path(self.DEFAULT_SAVE_DIR) / file_path
-            
-            # Create parent directories if needed
-            if create_dirs and not full_path.parent.exists():
-                try:
-                    # Create with secure permissions
-                    full_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-                    logging.info(f"Created directory: {full_path.parent}")
-                except PermissionError as e:
-                    return ToolFailure(error=f"Permission denied creating directory: {e}")
-                except Exception as e:
-                    return ToolFailure(error=f"Failed to create directory: {str(e)}")
-            
-            # Write the file
-            try:
-                async with aiofiles.open(full_path, mode, encoding="utf-8") as f:
-                    await f.write(content)
+            # Ensure directory exists
+            directory = os.path.dirname(path)
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
                 
-                # Verify file was written
-                file_size = os.path.getsize(full_path)
-                return f"Successfully saved {file_size} bytes to {full_path}"
-            except PermissionError:
-                return ToolFailure(error=f"Permission denied when writing to {full_path}")
-            except IsADirectoryError:
-                return ToolFailure(error=f"Cannot write to {full_path}: It's a directory")
-            except Exception as e:
-                return ToolFailure(error=f"Failed to write file: {type(e).__name__} - {str(e)}")
+            # Handle different content formats
+            if format_type == "binary":
+                return await self._save_binary(path, content, append)
+            elif format_type == "json":
+                return await self._save_json(path, content, append)
+            else:
+                return await self._save_text(path, content, append)
                 
         except Exception as e:
-            return ToolFailure(error=f"Unexpected error: {type(e).__name__} - {str(e)}")
-
-    async def run(self, **kwargs):
-        """Save file (alias for execute)"""
-        return await self.execute(**kwargs)
+            logger.error(f"Error saving file: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to save file: {str(e)}"
+            }
+            
+    async def _save_text(self, path: str, content: str, append: bool) -> Dict[str, Any]:
+        """Save text content to a file."""
+        mode = "a" if append else "w"
+        
+        try:
+            with open(path, mode, encoding="utf-8") as f:
+                f.write(content)
+                
+            logger.info(f"Saved text file: {path}")
+            return {
+                "status": "success",
+                "path": path,
+                "bytes_written": len(content.encode('utf-8')),
+                "message": f"File saved successfully at {path}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error saving text file: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to save text file: {str(e)}"
+            }
+            
+    async def _save_binary(self, path: str, content: str, append: bool) -> Dict[str, Any]:
+        """Save binary content (base64-encoded) to a file."""
+        try:
+            # Decode base64 content
+            try:
+                binary_data = base64.b64decode(content)
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error": f"Invalid base64 encoding: {str(e)}"
+                }
+                
+            # Write binary data
+            mode = "ab" if append else "wb"
+            with open(path, mode) as f:
+                f.write(binary_data)
+                
+            logger.info(f"Saved binary file: {path}")
+            return {
+                "status": "success",
+                "path": path,
+                "bytes_written": len(binary_data),
+                "message": f"Binary file saved successfully at {path}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error saving binary file: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to save binary file: {str(e)}"
+            }
+            
+    async def _save_json(self, path: str, content: Union[str, Dict], append: bool) -> Dict[str, Any]:
+        """Save JSON content to a file."""
+        try:
+            # Parse JSON if string
+            if isinstance(content, str):
+                try:
+                    json_content = json.loads(content)
+                except json.JSONDecodeError as e:
+                    return {
+                        "status": "error",
+                        "error": f"Invalid JSON content: {str(e)}"
+                    }
+            else:
+                json_content = content
+                
+            # Write JSON with proper formatting
+            mode = "a" if append else "w"
+            with open(path, mode, encoding="utf-8") as f:
+                if append:
+                    f.write("\n")
+                json.dump(json_content, f, indent=2, ensure_ascii=False)
+                
+            logger.info(f"Saved JSON file: {path}")
+            return {
+                "status": "success",
+                "path": path,
+                "message": f"JSON file saved successfully at {path}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error saving JSON file: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to save JSON file: {str(e)}"
+            }

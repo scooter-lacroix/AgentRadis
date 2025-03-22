@@ -10,66 +10,43 @@ import traceback
 from datetime import datetime
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List, Type
+from pathlib import Path
 
-# Create logs directory if it doesn't exist
-os.makedirs('logs', exist_ok=True)
+# Ensure log directory exists
+log_dir = os.path.expanduser("~/.agentradis/logs")
+os.makedirs(log_dir, exist_ok=True)
 
-# Configure logger
-logger = logging.getLogger('agentradis')
+# Configure logging
+logger = logging.getLogger("radis")
 logger.setLevel(logging.INFO)
 
-# Create formatter
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)-10s - %(message)s')
+# Create console handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_format = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S"
+)
+console_handler.setFormatter(console_format)
 
 # Create file handler
-file_handler = logging.FileHandler('logs/agentradis.log')
-file_handler.setFormatter(formatter)
+file_handler = logging.FileHandler(
+    os.path.join(log_dir, "radis.log"),
+    mode="a"
+)
+file_handler.setLevel(logging.DEBUG)
+file_format = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+file_handler.setFormatter(file_format)
+
+# Add handlers to logger
+logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
-# Create console handler with custom formatter
-class CustomConsoleFormatter(logging.Formatter):
-    """Custom formatter that adds separators for non-user-relevant info"""
-    
-    def format(self, record):
-        # Format the message
-        formatted_msg = super().format(record)
-        
-        # If this is an API call, tool usage, or status update, add separators
-        non_user_keywords = [
-            'HTTP Request', 
-            'API', 
-            'Processing', 
-            'Created',
-            'model call',
-            'Starting tool execution',
-            'Tool execution',
-            'Added',
-            'Initialized',
-            'Starting agent session',
-            'Ending agent session',
-            'Step',
-            'Tool use',
-            'Request processed'
-        ]
-        
-        if any(keyword in record.getMessage() for keyword in non_user_keywords):
-            console_width = 80  # Default width
-            try:
-                # Try to get terminal width
-                import shutil
-                console_width = shutil.get_terminal_size().columns
-            except:
-                pass
-            
-            separator = "=" * console_width
-            return f"{separator}\n{formatted_msg}\n{separator}"
-        
-        return formatted_msg
-
-console_handler = logging.StreamHandler(sys.stdout)
-console_formatter = CustomConsoleFormatter('%(asctime)s - %(name)-20s - %(levelname)-10s - %(message)s')
-console_handler.setFormatter(console_formatter)
-logger.addHandler(console_handler)
+# Prevent propagation to root logger
+logger.propagate = False
 
 # Custom log levels
 VERBOSE = 15
@@ -339,3 +316,11 @@ def set_log_level(level: Optional[str] = None):
     logger.setLevel(numeric_level)
     for handler in logger.handlers:
         handler.setLevel(numeric_level)
+
+# Custom debug function that logs with extra context
+def debug_with_context(message, context=None):
+    """Log a debug message with optional context dictionary"""
+    if context:
+        logger.debug(f"{message} | Context: {context}")
+    else:
+        logger.debug(message)

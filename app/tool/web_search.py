@@ -12,199 +12,292 @@ from datetime import datetime
 import pytz
 import requests
 from bs4 import BeautifulSoup
+import aiohttp
+import re
+from urllib.parse import quote_plus
 
 from app.config import config
 from app.exceptions import WebSearchException, InvalidToolArgumentException
 from app.logger import logger
-from app.tool.base import BaseTool, ToolResult
+from app.tool.base import BaseTool
+from app.tool.search_engines import (
+    GoogleWebSearch, DuckDuckGoSearch, BingSearch, BraveSearch
+)
 
 class WebSearch(BaseTool):
-    """Tool for searching the web for information."""
-
-    name: str = "web_search"
-    description: str = "Search the web for up-to-date information from the internet"
-    examples: List[str] = [
-        "web_search(query='current bitcoin price')",
-        "web_search(query='latest news about artificial intelligence')"
-    ]
-    timeout: float = 15.0
-    is_stateful: bool = False
+    """
+    Web search tool using multiple search engines for enhanced results.
+    """
+    
+    name = "web_search"
+    description = """
+    Search for information on the web.
+    This tool leverages multiple search engines to provide comprehensive results.
+    Useful for finding facts, recent information, and web content.
+    """
     parameters = {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query to perform"
+                "description": "The search query to look up information for"
             },
-            "verify": {
-                "type": "boolean",
-                "description": "Whether to perform additional verification of the information"
+            "engine": {
+                "type": "string",
+                "enum": ["google", "duckduckgo", "bing", "brave", "all"],
+                "description": "The search engine to use (defaults to google if not specified)"
+            },
+            "num_results": {
+                "type": "integer",
+                "description": "Number of results to return (default: 5, max: 10)"
             }
         },
         "required": ["query"]
     }
-
+    
+    # Cache to avoid repeated identical searches
+    _cache = {}
+    _cache_ttl = 300  # 5 minutes
+    
     def __init__(self, **kwargs):
         """Initialize the web search tool."""
         super().__init__(**kwargs)
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
-
-    async def execute(self, query: str, verify: bool = True) -> Dict[str, Any]:
+        
+        # Configure search engines
+        self.search_engines = {
+            "google": GoogleWebSearch(),
+            "duckduckgo": DuckDuckGoSearch(),
+            "bing": BingSearch(),
+            "brave": BraveSearch()
+        }
+    
+    async def run(self, **kwargs) -> Dict[str, Any]:
         """
-        Execute a web search
+        Execute a web search.
         
         Args:
             query: The search query
-            verify: Whether to perform additional verification
+            engine: The search engine to use (default: "google")
+            num_results: Number of results to return (default: 5)
             
         Returns:
-            Dict containing search results
+            Dictionary with search results
         """
-        logger.info(f"Web search for: {query}")
-        try:
-            # Special handling for date/time queries
-            if any(term in query.lower() for term in ["current date", "current time", "what time", "what date", "what is the date", "what is the time"]):
-                ny_tz = pytz.timezone('America/New_York')
-                current_time = datetime.now(ny_tz)
-                formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S %Z")
-                return {
-                    'status': 'success',
-                    'content': f"The current date and time in New York is: {formatted_time}"
-                }
-
-            # For Super Bowl or other major event queries, enhance the search query
-            if any(term in query.lower() for term in ["super bowl", "superbowl"]):
-                if any(term in query.lower() for term in ["recent", "last", "latest", "who performed", "halftime"]):
-                    query = f"{query} most recent 2024 2025"
-
-            # Perform web search using DuckDuckGo
-            query_url = f"https://lite.duckduckgo.com/lite?q={query.replace(' ', '+')}"
-            
-            # Make the request with timeout
-            response_future = asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.session.get(query_url, timeout=10)
-            )
-            
-            # Wait for response with timeout
-            response = await asyncio.wait_for(response_future, timeout=self.timeout)
-            response.raise_for_status()
-            
-            # Parse the response
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Extract search results
-            results = []
-            for result in soup.find_all('a', {'class': 'result-link'}):
-                title = result.text.strip()
-                url = result['href']
-                if title and url:
-                    results.append({
-                        'title': title,
-                        'url': url
-                    })
-            
-            # Format results
-            if results:
-                formatted_results = []
-                for result in results[:3]:  # Limit to top 3 results for faster processing
-                    # Try to extract relevant text around the result
-                    context = ""
-                    try:
-                        result_response_future = asyncio.get_event_loop().run_in_executor(
-                            None,
-                            lambda: self.session.get(result['url'], timeout=5)
-                        )
-                        
-                        # Wait for response with timeout
-                        result_response = await asyncio.wait_for(result_response_future, timeout=5)
-                        
-                        if result_response.ok:
-                            result_soup = BeautifulSoup(result_response.text, 'html.parser')
-                            # Get text from p tags near the search terms
-                            relevant_text = []
-                            for p in result_soup.find_all('p'):
-                                if any(term.lower() in p.text.lower() for term in query.split()):
-                                    relevant_text.append(p.text.strip())
-                            if relevant_text:
-                                context = " ".join(relevant_text[:2])  # Use first two relevant paragraphs
-                    except Exception as e:
-                        logger.debug(f"Error fetching context for {result['url']}: {str(e)}")
-                        pass  # Ignore errors in getting additional context
-                    
-                    formatted_results.append({
-                        'title': result['title'],
-                        'url': result['url'],
-                        'context': context
-                    })
-                
-                # Create a summary from the results
-                summary = self._create_summary(query, formatted_results)
-                
-                return {
-                    'status': 'success',
-                    'content': summary
-                }
-            else:
-                return {
-                    'status': 'error',
-                    'content': f"No search results found for query: {query}"
-                }
-            
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout while searching for: {query}")
+        query = kwargs.get("query", "")
+        engine = kwargs.get("engine", "google").lower()
+        num_results = min(int(kwargs.get("num_results", 5)), 10)
+        
+        if not query:
             return {
-                'status': 'error',
-                'content': f"Search timed out for query: {query}. Please try again with more specific terms."
-            }
-        except Exception as e:
-            logger.error(f"Error executing web search: {str(e)}")
-            return {
-                'status': 'error',
-                'content': f"Error performing web search: {str(e)}"
-            }
-
-    def _create_summary(self, query: str, results: List[Dict[str, str]]) -> str:
-        """Create a natural summary from search results."""
-        try:
-            # If we have context, use it to create a more natural response
-            contexts = [r['context'] for r in results if r['context']]
-            if contexts:
-                # Use the most relevant context to form the response
-                main_context = contexts[0]
-                # Add source link
-                source_url = results[0]['url']
-                return f"{main_context}\n\nSource: [{source_url}]({source_url})"
-            
-            # Fallback to basic listing if no good context
-            summary = "Here are the most relevant results:\n\n"
-            for i, result in enumerate(results, 1):
-                summary += f"{i}. {result['title']}\n   {result['url']}\n\n"
-            return summary
-            
-        except Exception as e:
-            logger.error(f"Error creating summary: {str(e)}")
-            # Fallback to very basic format
-            return "\n".join(r['url'] for r in results)
-
-    async def run(self, **kwargs):
-        """Execute a web search (alias for execute)."""
-        if "query" not in kwargs:
-            return {
-                'status': 'error',
-                'content': "Missing required parameter: query"
+                "status": "error",
+                "error": "No search query provided"
             }
         
-        verify = kwargs.get("verify", True)
-        return await self.execute(query=kwargs["query"], verify=verify)
-
+        # Check cache first
+        cache_key = f"{engine}:{query}:{num_results}"
+        if cache_key in self._cache:
+            cache_entry = self._cache[cache_key]
+            if time.time() - cache_entry["timestamp"] < self._cache_ttl:
+                logger.info(f"Using cached results for query: {query}")
+                return {
+                    "status": "success",
+                    "query": query,
+                    "engine": engine,
+                    "results": cache_entry["results"],
+                    "source": "cache"
+                }
+        
+        try:
+            logger.info(f"Performing web search for: {query}")
+            
+            if engine == "all":
+                # Use multiple engines and combine results
+                all_results = []
+                engines_to_try = ["google", "duckduckgo", "bing"]
+                
+                for search_engine in engines_to_try:
+                    try:
+                        results = await self._search_with_engine(search_engine, query, num_results)
+                        if results.get("status") == "success":
+                            all_results.extend(results.get("results", []))
+                    except Exception as e:
+                        logger.warning(f"Error with {search_engine} search: {e}")
+                
+                # Deduplicate results by URL
+                seen_urls = set()
+                unique_results = []
+                
+                for result in all_results:
+                    url = result.get("url", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        unique_results.append(result)
+                
+                # Take top results
+                unique_results = unique_results[:num_results]
+                
+                response = {
+                    "status": "success",
+                    "query": query,
+                    "engine": "multiple",
+                    "results": unique_results
+                }
+            else:
+                # Use a single engine
+                response = await self._search_with_engine(engine, query, num_results)
+            
+            # Cache the results
+            if response.get("status") == "success":
+                self._cache[cache_key] = {
+                    "timestamp": time.time(),
+                    "results": response.get("results", [])
+                }
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error during web search: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to perform search: {str(e)}",
+                "query": query
+            }
+    
+    async def _search_with_engine(self, engine: str, query: str, num_results: int) -> Dict[str, Any]:
+        """
+        Search with a specific engine.
+        
+        Args:
+            engine: The search engine to use
+            query: The search query
+            num_results: Number of results to return
+            
+        Returns:
+            Dictionary with search results
+        """
+        # Use the default if engine is not supported
+        if engine not in self.search_engines:
+            logger.warning(f"Unsupported search engine: {engine}, falling back to Google")
+            engine = "google"
+        
+        try:
+            search_engine = self.search_engines[engine]
+            results = await search_engine.search(query, num_results=num_results)
+            
+            # Debug the raw results to understand issues
+            logger.info(f"Raw search results: {json.dumps(results)}")
+            
+            # Clean and format results
+            clean_results = self._clean_results(results)
+            
+            # Debug the cleaned results
+            logger.info(f"Cleaned results count: {len(clean_results)}")
+            
+            return {
+                "status": "success",
+                "query": query,
+                "engine": engine,
+                "results": clean_results
+            }
+        except Exception as e:
+            logger.error(f"Error with {engine} search: {e}")
+            import traceback
+            logger.error(f"Search error traceback: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "error": f"Search engine error: {str(e)}",
+                "engine": engine,
+                "query": query
+            }
+    
+    def _clean_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Clean and format search results.
+        
+        Args:
+            results: Raw search results from engine
+            
+        Returns:
+            List of cleaned search result items
+        """
+        # If results is just a dictionary and not a list of results
+        if isinstance(results, dict):
+            # Get the results array from the dictionary
+            result_items = results.get("results", [])
+            # If there are no results, return an empty list
+            if not result_items:
+                return []
+            return result_items
+        
+        # If results is already a list, return it directly
+        if isinstance(results, list):
+            return results
+            
+        # If we got here, we don't know how to handle the results
+        logger.warning(f"Unknown search results format: {type(results)}")
+        return []
+    
+    def _format_search_result(self, item: Dict[str, Any]) -> str:
+        """
+        Format a single search result as a string.
+        
+        Args:
+            item: Search result item
+            
+        Returns:
+            Formatted string
+        """
+        title = item.get("title", "No title")
+        url = item.get("url", "")
+        snippet = item.get("snippet", "")
+        
+        result = f"Title: {title}\n"
+        if url:
+            result += f"URL: {url}\n"
+        if snippet:
+            result += f"Snippet: {snippet}\n"
+        
+        return result
+    
+    def _format_results(self, results: List[Dict[str, Any]]) -> str:
+        """
+        Format all search results as a string.
+        
+        Args:
+            results: List of search result items
+            
+        Returns:
+            Formatted string with all results
+        """
+        if not results:
+            return "No search results found."
+        
+        formatted = ""
+        for i, item in enumerate(results, 1):
+            formatted += f"\n--- Result {i} ---\n"
+            formatted += self._format_search_result(item)
+        
+        return formatted
+        
     async def cleanup(self):
         """Clean up resources."""
+        # Close any open sessions
         if hasattr(self, 'session') and self.session:
-            self.session.close()
+            try:
+                self.session.close()
+            except Exception as e:
+                logger.error(f"Error closing session: {e}")
+        
+        # Close any aiohttp sessions
+        for engine_name, engine in self.search_engines.items():
+            if hasattr(engine, 'session') and engine.session:
+                try:
+                    await engine.session.close()
+                except Exception as e:
+                    logger.error(f"Error closing {engine_name} session: {e}")
+        
+        # Clear the cache
+        self._cache.clear()
 
     async def reset(self):
         """Reset the tool's state."""

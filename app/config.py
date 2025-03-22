@@ -402,7 +402,7 @@ def override_config_from_env(config: Config) -> None:
 
 def setup_logging(logging_config: LoggingConfig) -> None:
     """Set up logging based on configuration"""
-    log_level = getattr(logging, logging_config.level.value)
+    log_level = logging_config.level  # Directly use the level string
     logging.basicConfig(
         level=log_level,
         format=logging_config.format,

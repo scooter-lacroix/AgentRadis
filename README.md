@@ -63,7 +63,7 @@ AgentRadis isn't just another AI tool—it's a **complete cognitive ecosystem** 
 AgentRadis comes packed with a **breathtaking collection of tools** that transform what's possible with AI. Each tool is meticulously crafted for maximum performance and reliability, giving you capabilities that feel like superpowers.
 
 ### 🔥 Ultimate File Manipulation Suite
-- **📁 FileTool**: Powerful file operations with military-grade security controls
+- **📁 FileTool**: Powerful file operations with robust permission-based security controls
 - **📝 FileSaver**: Instant content saving with automatic formatting and versioning
 - **🔍 FileSearch**: Lightning-fast file discovery across your entire system
 - **📊 FileStat**: Comprehensive file analysis and visualization tools

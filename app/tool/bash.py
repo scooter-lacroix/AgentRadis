@@ -1,9 +1,9 @@
 import asyncio
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from app.exceptions import ToolError
-from app.tool.base import BaseTool, CLIResult, ToolResult
+from app.tool.base import BaseTool
 
 
 _BASH_DESCRIPTION = """Execute a bash command in the terminal.
@@ -52,15 +52,16 @@ class _BashSession:
             return
         self._process.terminate()
 
-    async def run(self, command: str):
+    async def run(self, command: str) -> Dict[str, Any]:
         """Execute a command in the bash shell."""
         if not self._started:
             raise ToolError("Session has not started.")
         if self._process.returncode is not None:
-            return ToolResult(
-                system="tool must be restarted",
-                error=f"bash has exited with returncode {self._process.returncode}",
-            )
+            return {
+                "status": "error",
+                "error": f"bash has exited with returncode {self._process.returncode}",
+                "system": "tool must be restarted"
+            }
         if self._timed_out:
             raise ToolError(
                 f"timed out: bash has not returned in {self._timeout} seconds and must be restarted",
@@ -110,7 +111,11 @@ class _BashSession:
         self._process.stdout._buffer.clear()  # pyright: ignore[reportAttributeAccessIssue]
         self._process.stderr._buffer.clear()  # pyright: ignore[reportAttributeAccessIssue]
 
-        return CLIResult(output=output, error=error)
+        return {
+            "status": "success",
+            "output": output,
+            "error": error
+        }
 
 
 class Bash(BaseTool):
@@ -131,16 +136,30 @@ class Bash(BaseTool):
 
     _session: Optional[_BashSession] = None
 
-    async def execute(
-        self, command: str | None = None, restart: bool = False, **kwargs
-    ) -> CLIResult:
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """
+        Run a bash command.
+        
+        Args:
+            command: The bash command to execute
+            restart: Whether to restart the bash session
+            
+        Returns:
+            Dictionary with the command output
+        """
+        command = kwargs.get("command")
+        restart = kwargs.get("restart", False)
+        
         if restart:
             if self._session:
                 self._session.stop()
             self._session = _BashSession()
             await self._session.start()
 
-            return ToolResult(system="tool has been restarted.")
+            return {
+                "status": "success", 
+                "message": "Bash session restarted"
+            }
 
         if self._session is None:
             self._session = _BashSession()
@@ -149,10 +168,13 @@ class Bash(BaseTool):
         if command is not None:
             return await self._session.run(command)
 
-        raise ToolError("no command provided.")
+        return {
+            "status": "error",
+            "error": "No command provided"
+        }
 
 
 if __name__ == "__main__":
     bash = Bash()
-    rst = asyncio.run(bash.execute("ls -l"))
+    rst = asyncio.run(bash.run(command="ls -l"))
     print(rst)

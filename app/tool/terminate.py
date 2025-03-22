@@ -1,29 +1,68 @@
+"""
+Termination tool for ending agent execution.
+"""
+from typing import Any, Dict
+
+from app.logger import logger
 from app.tool.base import BaseTool
 
-
-_TERMINATE_DESCRIPTION = """Terminate the interaction when the request is met OR if the assistant cannot proceed further with the task.
-When you have finished all the tasks, call this tool to end the work."""
-
-
 class Terminate(BaseTool):
-    name: str = "terminate"
-    description: str = _TERMINATE_DESCRIPTION
-    parameters: dict = {
+    """
+    Tool for gracefully terminating agent execution.
+    """
+    
+    name = "terminate"
+    description = """
+    Terminate the current agent execution.
+    This tool signals the agent to stop processing and return a final answer.
+    Use this when you have completed a task or have a final answer to provide.
+    """
+    parameters = {
         "type": "object",
         "properties": {
-            "status": {
+            "message": {
                 "type": "string",
-                "description": "The finish status of the interaction.",
-                "enum": ["success", "failure"],
+                "description": "Final message or result to return to the user"
+            },
+            "reason": {
+                "type": "string",
+                "description": "Reason for termination (for logging purposes)"
             }
         },
-        "required": ["status"],
+        "required": ["message"]
     }
-
-    async def execute(self, status: str) -> str:
-        """Finish the current execution"""
-        return f"The interaction has been completed with status: {status}"
-
-    async def run(self, **kwargs):
-        """Terminate execution (alias for execute)"""
-        return await self.execute(**kwargs)
+    
+    def __init__(self, **kwargs):
+        """Initialize the Terminate tool."""
+        super().__init__(**kwargs)
+    
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """
+        Execute a termination request.
+        
+        Args:
+            message: Final message or result to return to the user
+            reason: Reason for termination (for logging purposes)
+            
+        Returns:
+            Dictionary with termination status and message
+        """
+        message = kwargs.get("message", "Task completed.")
+        reason = kwargs.get("reason", "Task completed successfully.")
+        
+        logger.info(f"Agent termination requested: {reason}")
+        
+        return {
+            "status": "terminate",
+            "message": message,
+            "reason": reason,
+            "terminate": True
+        }
+    
+    async def cleanup(self):
+        """Clean up resources."""
+        pass
+    
+    async def reset(self):
+        """Reset the tool state."""
+        pass 

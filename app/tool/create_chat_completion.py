@@ -1,169 +1,168 @@
-from typing import Any, List, Optional, Type, Union, get_args, get_origin
+"""
+Chat completion tool for generating text with LLM models.
+"""
+import os
+import json
+import logging
+import asyncio
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from app.logger import logger
+from app.tool.base import BaseTool
+from app.config import config
 
-from app.tool import BaseTool
+# Import the appropriate LLM backend based on configuration
+try:
+    from app.llm import get_llm
+except ImportError:
+    logger.warning("LLM module not available, using dummy implementation")
+    def get_llm():
+        return DummyLLM()
 
+class DummyLLM:
+    """Fallback LLM implementation that returns a placeholder response."""
+    
+    async def generate(self, messages, **kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "This is a placeholder response. The LLM module is not available."
+                    }
+                }
+            ]
+        }
 
 class CreateChatCompletion(BaseTool):
-    name: str = "create_chat_completion"
-    description: str = (
-        "Creates a structured completion with specified output formatting."
-    )
-
-    # Type mapping for JSON schema
-    type_mapping: dict = {
-        str: "string",
-        int: "integer",
-        float: "number",
-        bool: "boolean",
-        dict: "object",
-        list: "array",
-    }
-    response_type: Optional[Type] = None
-    required: List[str] = Field(default_factory=lambda: ["response"])
-
-    def __init__(self, response_type: Optional[Type] = str):
-        """Initialize with a specific response type."""
-        super().__init__()
-        self.response_type = response_type
-        self.parameters = self._build_parameters()
-
-    def _build_parameters(self) -> dict:
-        """Build parameters schema based on response type."""
-        if self.response_type == str:
-            return {
-                "type": "object",
-                "properties": {
-                    "response": {
-                        "type": "string",
-                        "description": "The response text that should be delivered to the user.",
+    """
+    Tool for generating text using LLM models.
+    """
+    
+    name = "create_chat_completion"
+    description = """
+    Generate text using a language model based on provided messages.
+    This tool communicates with LLM APIs to generate responses based on conversation history.
+    """
+    parameters = {
+        "type": "object",
+        "properties": {
+            "messages": {
+                "type": "array",
+                "description": "List of messages in the conversation history",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "role": {
+                            "type": "string",
+                            "enum": ["system", "user", "assistant", "function"],
+                            "description": "The role of the message sender"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The content of the message"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the function (for function role)"
+                        }
                     },
-                },
-                "required": self.required,
-            }
-
-        if isinstance(self.response_type, type) and issubclass(
-            self.response_type, BaseModel
-        ):
-            schema = self.response_type.model_json_schema()
-            return {
-                "type": "object",
-                "properties": schema["properties"],
-                "required": schema.get("required", self.required),
-            }
-
-        return self._create_type_schema(self.response_type)
-
-    def _create_type_schema(self, type_hint: Type) -> dict:
-        """Create a JSON schema for the given type."""
-        origin = get_origin(type_hint)
-        args = get_args(type_hint)
-
-        # Handle primitive types
-        if origin is None:
-            return {
-                "type": "object",
-                "properties": {
-                    "response": {
-                        "type": self.type_mapping.get(type_hint, "string"),
-                        "description": f"Response of type {type_hint.__name__}",
-                    }
-                },
-                "required": self.required,
-            }
-
-        # Handle List type
-        if origin is list:
-            item_type = args[0] if args else Any
-            return {
-                "type": "object",
-                "properties": {
-                    "response": {
-                        "type": "array",
-                        "items": self._get_type_info(item_type),
-                    }
-                },
-                "required": self.required,
-            }
-
-        # Handle Dict type
-        if origin is dict:
-            value_type = args[1] if len(args) > 1 else Any
-            return {
-                "type": "object",
-                "properties": {
-                    "response": {
-                        "type": "object",
-                        "additionalProperties": self._get_type_info(value_type),
-                    }
-                },
-                "required": self.required,
-            }
-
-        # Handle Union type
-        if origin is Union:
-            return self._create_union_schema(args)
-
-        return self._build_parameters()
-
-    def _get_type_info(self, type_hint: Type) -> dict:
-        """Get type information for a single type."""
-        if isinstance(type_hint, type) and issubclass(type_hint, BaseModel):
-            return type_hint.model_json_schema()
-
-        return {
-            "type": self.type_mapping.get(type_hint, "string"),
-            "description": f"Value of type {getattr(type_hint, '__name__', 'any')}",
-        }
-
-    def _create_union_schema(self, types: tuple) -> dict:
-        """Create schema for Union types."""
-        return {
-            "type": "object",
-            "properties": {
-                "response": {"anyOf": [self._get_type_info(t) for t in types]}
+                    "required": ["role", "content"]
+                }
             },
-            "required": self.required,
-        }
-
-    async def execute(self, required: list | None = None, **kwargs) -> Any:
-        """Execute the chat completion with type conversion.
-
-        Args:
-            required: List of required field names or None
-            **kwargs: Response data
-
-        Returns:
-            Converted response based on response_type
+            "model": {
+                "type": "string",
+                "description": "The model to use for generation (default: config default model)"
+            },
+            "temperature": {
+                "type": "number",
+                "description": "Temperature for generation (0-2, default: 0.7)"
+            },
+            "max_tokens": {
+                "type": "integer",
+                "description": "Maximum tokens to generate (default: determined by model)"
+            },
+            "system_prompt": {
+                "type": "string",
+                "description": "System prompt to prepend to the messages"
+            }
+        },
+        "required": ["messages"]
+    }
+    
+    def __init__(self, **kwargs):
+        """Initialize the CreateChatCompletion tool."""
+        super().__init__(**kwargs)
+        self.llm = get_llm()
+    
+    async def run(self, **kwargs) -> Dict[str, Any]:
         """
-        required = required or self.required
-
-        # Handle case when required is a list
-        if isinstance(required, list) and len(required) > 0:
-            if len(required) == 1:
-                required_field = required[0]
-                result = kwargs.get(required_field, "")
-            else:
-                # Return multiple fields as a dictionary
-                return {field: kwargs.get(field, "") for field in required}
-        else:
-            required_field = "response"
-            result = kwargs.get(required_field, "")
-
-        # Type conversion logic
-        if self.response_type == str:
-            return result
-
-        if isinstance(self.response_type, type) and issubclass(
-            self.response_type, BaseModel
-        ):
-            return self.response_type(**kwargs)
-
-        if get_origin(self.response_type) in (list, dict):
-            return result  # Assuming result is already in correct format
-
+        Execute a chat completion.
+        
+        Args:
+            messages: List of message objects with role and content
+            model: Model to use for generation
+            temperature: Temperature for generation
+            max_tokens: Maximum tokens to generate
+            system_prompt: System prompt to prepend to the messages
+            
+        Returns:
+            Dictionary with generation results
+        """
+        messages = kwargs.get("messages", [])
+        model = kwargs.get("model", config.get("default_model", "gpt-3.5-turbo"))
+        temperature = kwargs.get("temperature", 0.7)
+        max_tokens = kwargs.get("max_tokens")
+        system_prompt = kwargs.get("system_prompt")
+        
+        if not messages:
+            return {
+                "status": "error",
+                "error": "No messages provided for chat completion"
+            }
+        
+        # Add system prompt if provided and not already in messages
+        if system_prompt and not any(m.get("role") == "system" for m in messages):
+            messages = [{"role": "system", "content": system_prompt}] + messages
+        
         try:
-            return self.response_type(result)
-        except (ValueError, TypeError):
-            return result
+            # Prepare parameters for the LLM
+            llm_params = {
+                "model": model,
+                "temperature": temperature
+            }
+            
+            if max_tokens:
+                llm_params["max_tokens"] = max_tokens
+            
+            # Generate completion
+            logger.info(f"Generating chat completion with model: {model}")
+            response = await self.llm.generate(messages, **llm_params)
+            
+            # Extract and format the response
+            completion = ""
+            if response and "choices" in response and len(response["choices"]) > 0:
+                choice = response["choices"][0]
+                message = choice.get("message", {})
+                completion = message.get("content", "")
+            
+            return {
+                "status": "success",
+                "completion": completion,
+                "model": model,
+                "full_response": response
+            }
+        except Exception as e:
+            logger.error(f"Error generating chat completion: {str(e)}")
+            return {
+                "status": "error",
+                "error": f"Chat completion failed: {str(e)}"
+            }
+    
+    async def cleanup(self):
+        """Clean up resources."""
+        pass
+    
+    async def reset(self):
+        """Reset the tool state."""
+        pass 

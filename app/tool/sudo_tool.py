@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 
 from app.tool.base import BaseTool
 from app.logger import logger
-from app.utils.sudo import run_sudo_command
+from app.utils.sudo import run_sudo_command, clear_sudo_cache
 
 class SudoTool(BaseTool):
     """Tool for executing privileged commands with sudo."""
@@ -35,52 +35,61 @@ class SudoTool(BaseTool):
         "required": ["command"]
     }
     
-    async def execute(self, **kwargs) -> Dict[str, Any]:
-        """Execute a sudo command."""
-        if "command" not in kwargs:
-            return {
-                'status': 'error',
-                'error': 'Missing required parameter: command'
-            }
-        require_password = kwargs.get('require_password', True)
-        return await self.run(kwargs['command'], require_password)
+    # Cache for sudo password and timestamp
+    _sudo_password: Optional[str] = None
+    _sudo_timestamp: Optional[float] = None
     
-    async def run(self, command: str, require_password: bool = True) -> Dict[str, Any]:
+    async def run(self, **kwargs) -> Dict[str, Any]:
         """
         Execute a command with sudo privileges.
         
         Args:
             command: The command to execute with sudo
-            require_password: Whether to require password input
+            require_password: Whether to require password input (default: True)
             
         Returns:
-            Dict containing command output and status
+            Dictionary containing command output and status
         """
-        try:
-            # Run the command with sudo
-            result = await run_sudo_command(command, require_password)
-            
-            if not result['success']:
-                logger.error(f"Sudo command failed: {result['error']}")
-                return {
-                    'status': 'error',
-                    'error': f"Command failed: {result['error']}"
-                }
-                
+        command = kwargs.get("command", "")
+        require_password = kwargs.get("require_password", True)
+        
+        if not command:
             return {
-                'status': 'success',
-                'output': result['output'],
-                'code': result['code']
+                "status": "error",
+                "error": "No command provided"
             }
             
+        # Inform user and check consent
+        logger.info(f"Executing privileged command: {command}")
+        
+        try:
+            # Execute the command with sudo
+            result = await run_sudo_command(command, require_password)
+            
+            status_msg = "Command executed successfully" if result.get("success") else "Command execution failed"
+            logger.info(status_msg)
+            
+            return {
+                "status": "success" if result.get("success") else "error",
+                "output": result.get("output", ""),
+                "error": result.get("error", ""),
+                "code": result.get("code", -1)
+            }
+            
+        except asyncio.TimeoutError:
+            return {
+                "status": "error",
+                "error": "Command execution timed out",
+                "code": -1
+            }
         except Exception as e:
             logger.error(f"Error executing sudo command: {e}")
             return {
-                'status': 'error',
-                'error': str(e)
+                "status": "error",
+                "error": f"Error: {str(e)}",
+                "code": -1
             }
-            
+    
     async def cleanup(self):
-        """Clean up any resources."""
-        # Nothing to clean up for this tool
-        pass 
+        """Clean up resources and clear any cached sudo password."""
+        clear_sudo_cache() 
