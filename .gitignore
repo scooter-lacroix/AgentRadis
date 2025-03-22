@@ -201,7 +201,7 @@ run.sh
 # Unrelated projects and directories
 Manus/
 Proj/
-openmanus/
+agentradis_legacy/
 =2.0
 agentradis/
 rag_components.tsx

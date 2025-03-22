@@ -1,8 +1,8 @@
 ---
-name: "🤔 Request new features"
-about: Suggest ideas or features you’d like to see implemented in OpenManus.
-title: ''
-labels: kind/features
+name: Feature Request
+about: Suggest ideas or features you'd like to see implemented in AgentRadis.
+title: '[Feature Request] '
+labels: 'enhancement'
 assignees: ''
 ---
 

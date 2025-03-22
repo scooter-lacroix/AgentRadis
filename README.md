@@ -5,7 +5,7 @@
 AgentRadis is an extensible AI agent system designed to interact with various tools while maintaining context awareness. It provides a flexible framework for building AI-powered applications with tool-calling capabilities, encapsulated in a beautiful and intuitive interface. ✨
 
 <p align="center">
-  <img src="docs/images/agent_radis_banner.png" alt="AgentRadis Banner" width="800"/>
+  <img src="docs/images/banner.txt" alt="AgentRadis Banner" width="800"/>
 </p>
 
 ## ✨ Features
@@ -23,6 +23,329 @@ AgentRadis is an extensible AI agent system designed to interact with various to
 - **🔍 Robust Web Search**: Multi-engine search with comprehensive results
 - **📄 Text Manipulation**: Powerful string editing and replacement capabilities
 - **💻 Code Execution**: Safe and isolated Python code execution
+
+## 🏗️ Revolutionary Architecture: The Brain Behind the Magic
+
+AgentRadis isn't just another AI tool—it's a **complete cognitive ecosystem** built from the ground up for unparalleled versatility and power. Our cutting-edge architecture combines state-of-the-art AI with innovative engineering to create an experience that feels nothing short of magical.
+
+<p align="center">
+  <img src="docs/images/architecture.txt" alt="AgentRadis Architecture" width="700"/>
+</p>
+
+### 🧠 Four-Tier Intelligence Architecture
+
+- **🌟 Brilliantly Adaptive Agent Layer**
+  - **Radis Agent**: The crown jewel—our flagship general-purpose agent with advanced reasoning capabilities that adapts to virtually any task
+  - **ToolCall Agent**: A specialized powerhouse that executes complex tool chains with unmatched precision
+  - **Planning Agent**: Our strategic mastermind that breaks complex problems into perfectly orchestrated action plans
+  - Each agent features our proprietary **Contextual Memory System™** that maintains perfect awareness of ongoing tasks
+
+- **🛠️ Enterprise-Grade Tool Layer** 
+  - Over 35+ specialized tools seamlessly integrated into a cohesive ecosystem
+  - Modular design allows for infinite extensibility with zero friction
+  - Real-time tool discovery and autonomous tool acquisition capabilities
+  - Built-in automatic error handling and recovery protocols
+
+- **🔌 Lightning-Fast API Layer**
+  - Built on industrial-strength FastAPI for millisecond response times
+  - WebSocket support for real-time bidirectional communication
+  - Enterprise-ready authentication and rate limiting
+  - Comprehensive API documentation with interactive examples
+
+- **💎 Stunning Interface Layer**
+  - Award-worthy responsive design that works flawlessly across all devices
+  - Intelligent dark/light mode transitions based on user preferences
+  - Real-time visualization of agent reasoning and tool execution
+  - Voice-enabled interface with natural language processing
+
+## 🛠️ Supercharged Tool Arsenal: Unlimited Possibilities
+
+AgentRadis comes packed with a **breathtaking collection of tools** that transform what's possible with AI. Each tool is meticulously crafted for maximum performance and reliability, giving you capabilities that feel like superpowers.
+
+### 🔥 Ultimate File Manipulation Suite
+- **📁 FileTool**: Powerful file operations with military-grade security controls
+- **📝 FileSaver**: Instant content saving with automatic formatting and versioning
+- **🔍 FileSearch**: Lightning-fast file discovery across your entire system
+- **📊 FileStat**: Comprehensive file analysis and visualization tools
+
+### 🌐 Web Intelligence Center
+- **🔎 WebSearch**: Multi-engine search capabilities that leave no stone unturned
+- **🧠 WebExtract**: Advanced content extraction with semantic understanding
+- **📸 WebCapture**: High-fidelity website captures with interactive elements
+- **🔄 WebInteract**: Full browser automation for complex web tasks
+
+### 💻 Code Execution Powerhouse
+- **🐍 PythonTool**: Execute Python code within a secure sandboxed environment
+- **⚡ JavaScriptTool**: Run JavaScript with full DOM interaction capabilities
+- **📊 DataAnalysisTool**: Process and visualize complex datasets with a single command
+- **🤖 AutomationTool**: Create sophisticated workflows with minimal code
+
+### 🗣️ Advanced Communication Hub
+- **🎤 SpeechTool**: State-of-the-art speech recognition and synthesis
+- **🔊 AudioTool**: Comprehensive audio processing and analysis
+- **📱 NotificationTool**: Multi-channel alerts and notifications
+- **💬 ChatTool**: Engage with multiple LLM providers simultaneously
+
+### 🧩 System Integration Masters
+- **💻 Terminal**: Execute system commands with precision and safety
+- **🐧 Bash**: Run complex bash scripts with rich output parsing
+- **🔌 APITool**: Interact with external APIs with automatic authentication
+- **📡 NetworkTool**: Comprehensive network diagnostics and management
+
+## 🚀 Limitless Expansion: Beyond Imagination
+
+AgentRadis isn't just a tool—it's a **living, growing ecosystem** designed to constantly evolve and expand. Our revolutionary architecture allows for unlimited customization and extension to meet any challenge you can imagine.
+
+### 🧩 Build Your Dream Tools in Minutes
+
+```python
+from app.tool.base import BaseTool
+
+class MyCustomTool(BaseTool):
+    name = "my_custom_tool"
+    description = "Description of what your tool does"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "Description of parameter"
+            }
+        },
+        "required": ["param1"]
+    }
+    
+    async def run(self, **kwargs) -> dict:
+        # Implement your tool logic
+        param1 = kwargs.get("param1")
+        # Process the parameter
+        result = f"Processed {param1}"
+        return {
+            "status": "success", 
+            "result": result
+        }
+        
+    async def cleanup(self):
+        # Clean up any resources
+        pass
+```
+
+### 🌟 Autonomous Tool Discovery & Integration
+
+AgentRadis takes extension to the next level with its **revolutionary MCP App Store integration**. Unlike any other AI system, AgentRadis can:
+
+- **🧠 Autonomously identify when it needs additional capabilities** and request them from the MCP App Store
+- **🔍 Dynamically discover new tools** based on the task at hand without human intervention
+- **⚡ Install and integrate new tools in seconds**, making them immediately available
+- **👨‍💻 Learn how to use new tools on the fly** with zero training required
+- **🔄 Manage tool lifecycles automatically**, including updates and dependencies
+
+Simply ask AgentRadis to perform a task requiring a specialized tool, and watch in amazement as it:
+
+```
+User: "Can you analyze the sentiment in these customer reviews?"
+
+AgentRadis: "I'll analyze the sentiment in these customer reviews for you. I need to install a specialized tool for this task."
+
+[AgentRadis automatically searches the MCP App Store]
+
+AgentRadis: "I've found and installed the SentimentAnalyzer tool from the MCP App Store. Now I'll analyze your customer reviews..."
+
+[Results appear moments later]
+```
+
+### 🔮 Custom Agents for Specialized Tasks
+
+Create specialized agents tailored to specific domains with our intuitive extension framework:
+
+```python
+from app.agent.toolcall import ToolCallAgent
+from app.tool import ToolCollection, WebSearch, FileSaver
+
+class ResearchAgent(ToolCallAgent):
+    name = "ResearchAgent"
+    description = "Agent specialized in research tasks"
+    available_tools = ToolCollection(
+        WebSearch(),
+        FileSaver()
+    )
+    system_prompt = "You are a research assistant focused on finding accurate information."
+```
+
+## 🗣️ Speech Capabilities
+
+AgentRadis includes powerful speech recognition and synthesis capabilities:
+
+### Speech Recognition
+- Real-time speech-to-text conversion
+- Multiple language support
+- Configurable sensitivity and silence detection
+- Local model support for privacy
+
+### Speech Synthesis
+- High-quality text-to-speech
+- Multiple voice options (alloy, echo, fable, onyx, nova, shimmer)
+- Speed and pitch control
+- SSML support for advanced control
+
+Example usage:
+```python
+from app.tool import SpeechTool
+
+# Initialize the speech tool
+speech = SpeechTool()
+
+# Listen for speech
+result = await speech.run(
+    action="listen",
+    timeout=10.0,
+    language="en"
+)
+print(f"Heard: {result['text']}")
+
+# Speak text
+await speech.run(
+    action="speak",
+    text="Hello, I am AgentRadis!",
+    voice="alloy"
+)
+```
+
+## 🔍 Web Search Capabilities
+
+AgentRadis includes a powerful web search system that:
+
+- Supports multiple search engines (Google, Bing, DuckDuckGo, Brave)
+- Combines results for comprehensive coverage
+- Caches results to improve performance
+- Handles rate limiting and errors gracefully
+- Provides contextual snippets for better understanding
+- Extracts structured data when available
+- Supports image search capabilities
+
+Example usage:
+```python
+from app.tool import WebSearch
+
+# Initialize the web search tool
+search = WebSearch()
+
+# Perform a search
+result = await search.run(
+    query="latest developments in AI",
+    engine="google",
+    num_results=5
+)
+
+# Process results
+for item in result["results"]:
+    print(f"Title: {item['title']}")
+    print(f"URL: {item['url']}")
+    print(f"Snippet: {item['snippet']}")
+    print("---")
+```
+
+## 📝 String Replacement Tool
+
+The `StrReplaceEditor` tool provides powerful text manipulation capabilities:
+
+- Basic string replacement
+- Regular expression support
+- File content manipulation
+- Batch operations across multiple files
+- Interactive mode for confirmation
+- Undo/redo capability
+
+Example usage:
+```python
+from app.tool import StrReplaceEditor
+
+# Initialize the string replacement tool
+editor = StrReplaceEditor()
+
+# Replace in a single file
+result = await editor.run(
+    action="replace",
+    target_file="example.txt",
+    pattern="hello",
+    replacement="world",
+    use_regex=False
+)
+print(f"Replacements made: {result['count']}")
+
+# Replace with regex
+result = await editor.run(
+    action="replace",
+    target_file="code.py",
+    pattern=r"def (\w+)\(",
+    replacement=r"def renamed_\1(",
+    use_regex=True
+)
+```
+
+## 📊 Performance and Limits
+
+- **Memory Usage**: Typically requires 150-500MB RAM
+- **Disk Space**: ~200MB for core installation, additional space for cached data
+- **API Rate Limits**: Respects provider rate limits with exponential backoff
+- **Tool Execution**: Timeout protection for all tools (default 30s)
+- **Python Execution**: Sandboxed with memory and time limits
+- **Concurrent Operations**: Handles multiple simultaneous requests
+- **Response Size**: Manages large responses with chunking and streaming
+
+## 🔌 API Integration
+
+AgentRadis provides a comprehensive API for integration with other applications:
+
+```python
+import requests
+import json
+
+# Basic chat request
+response = requests.post(
+    "http://localhost:5001/api/v1/chat",
+    json={
+        "prompt": "Search for information about quantum computing",
+        "stream": False
+    },
+    headers={"Authorization": "Bearer your-api-key"}
+)
+result = response.json()
+
+# Tool execution request
+response = requests.post(
+    "http://localhost:5001/api/v1/tool",
+    json={
+        "tool": "web_search",
+        "params": {
+            "query": "quantum computing advances 2024",
+            "engine": "google"
+        }
+    },
+    headers={"Authorization": "Bearer your-api-key"}
+)
+search_result = response.json()
+
+# Streaming response
+with requests.post(
+    "http://localhost:5001/api/v1/chat",
+    json={"prompt": "Write a long essay about AI", "stream": True},
+    headers={"Authorization": "Bearer your-api-key"},
+    stream=True
+) as response:
+    for line in response.iter_lines():
+        if line:
+            chunk = json.loads(line.decode('utf-8'))
+            print(chunk["content"], end="", flush=True)
+```
+
+## 🙏 Acknowledgements
+
+AgentRadis draws inspiration from these outstanding projects:
+
+- [Langchain](https://github.com/langchain-ai/langchain) - Framework for LLM applications
+- [AutoGPT](https://github.com/Significant-Gravitas/AutoGPT) - An autonomous GPT-4 experiment
+- [AgentGPT](https://github.com/reworkd/AgentGPT) - AI agents in your browser
 
 ## 🚀 Getting Started
 
@@ -284,297 +607,6 @@ Example:
 ./run.sh --flow "create a Python script that downloads images"
 ```
 
-## 🏗️ Architecture
-
-AgentRadis is built with a modular architecture:
-
-- **🤖 Agent Layer**: Core agent system that processes prompts and orchestrates tool usage
-  - **Radis Agent**: General-purpose agent for most tasks
-  - **ToolCall Agent**: Specialized agent with enhanced tool-calling capabilities
-  - **Planning Agent**: Agent focused on planning and executing multi-step tasks
-
-- **🔧 Tool Layer**: Extensive collection of tools that agents can leverage
-  - **File Tools**: File reading, writing, and manipulation
-  - **Web Tools**: Web search, page reading, and interaction
-  - **Code Tools**: Python execution, validation, and analysis
-  - **System Tools**: Terminal commands, bash scripts
-  - **Specialized Tools**: String replacement, speech tools, etc.
-
-- **🔌 API Layer**: FastAPI-based REST API for programmatic access
-  - RESTful endpoints for agent interaction
-  - Websocket support for real-time updates
-  - Authentication and rate limiting
-
-- **🎨 Interface Layer**: Multiple user interfaces
-  - Web UI with modern responsive design
-  - CLI with rich formatting
-  - API clients for various programming languages
-
-## 🛠️ Available Tools
-
-### Core Tools
-- **📁 FileTool**: Read, write, and manage files
-- **📝 FileSaver**: Save content to files on the system
-- **🔍 WebSearch**: Search the web with multiple engines
-- **🐍 PythonTool**: Execute Python code safely
-- **💬 CreateChatCompletion**: Generate text completions
-
-### Advanced Tools
-- **🔄 StrReplaceEditor**: Powerful string replacement with regex support
-- **🌐 WebTool**: Navigate and extract data from websites
-- **💻 Terminal**: Execute terminal commands with granular control
-- **🐚 Bash**: Execute bash scripts and commands
-- **🗣️ SpeechTool**: Speech recognition and synthesis
-
-### System Tools
-- **🔧 ToolManager**: Manage and discover available tools
-- **🔌 ToolCollection**: Group and organize tools
-- **📦 PlanningTool**: Plan and execute complex tasks
-- **🔒 SudoTool**: Execute commands with elevated privileges (when enabled)
-- **⏹️ Terminate**: Gracefully end an agent session
-
-## 🔧 Extending AgentRadis
-
-### Adding New Tools 🛠️
-
-Create a new tool by implementing the `BaseTool` interface:
-
-```python
-from app.tool.base import BaseTool
-
-class MyCustomTool(BaseTool):
-    name = "my_custom_tool"
-    description = "Description of what your tool does"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "param1": {
-                "type": "string",
-                "description": "Description of parameter"
-            }
-        },
-        "required": ["param1"]
-    }
-    
-    async def run(self, **kwargs) -> dict:
-        # Implement your tool logic
-        param1 = kwargs.get("param1")
-        # Process the parameter
-        result = f"Processed {param1}"
-        return {
-            "status": "success", 
-            "result": result
-        }
-        
-    async def cleanup(self):
-        # Clean up any resources
-        pass
-```
-
-Then register your tool with the agent:
-
-```python
-from app.agent.radis import Radis
-from my_tools import MyCustomTool
-
-agent = Radis()
-agent.add_tool(MyCustomTool())
-result = await agent.run("Use my custom tool with parameter value")
-```
-
-### Creating Custom Agents 🤖
-
-You can create specialized agents by extending the base agent classes:
-
-```python
-from app.agent.toolcall import ToolCallAgent
-from app.tool import ToolCollection, WebSearch, FileSaver
-
-class ResearchAgent(ToolCallAgent):
-    name = "ResearchAgent"
-    description = "Agent specialized in research tasks"
-    available_tools = ToolCollection(
-        WebSearch(),
-        FileSaver()
-    )
-    system_prompt = "You are a research assistant focused on finding accurate information."
-```
-
-## 🗣️ Speech Capabilities
-
-AgentRadis includes powerful speech recognition and synthesis capabilities:
-
-### Speech Recognition
-- Real-time speech-to-text conversion
-- Multiple language support
-- Configurable sensitivity and silence detection
-- Local model support for privacy
-
-### Speech Synthesis
-- High-quality text-to-speech
-- Multiple voice options (alloy, echo, fable, onyx, nova, shimmer)
-- Speed and pitch control
-- SSML support for advanced control
-
-Example usage:
-```python
-from app.tool import SpeechTool
-
-# Initialize the speech tool
-speech = SpeechTool()
-
-# Listen for speech
-result = await speech.run(
-    action="listen",
-    timeout=10.0,
-    language="en"
-)
-print(f"Heard: {result['text']}")
-
-# Speak text
-await speech.run(
-    action="speak",
-    text="Hello, I am AgentRadis!",
-    voice="alloy"
-)
-```
-
-## 🔍 Web Search Capabilities
-
-AgentRadis includes a powerful web search system that:
-
-- Supports multiple search engines (Google, Bing, DuckDuckGo, Brave)
-- Combines results for comprehensive coverage
-- Caches results to improve performance
-- Handles rate limiting and errors gracefully
-- Provides contextual snippets for better understanding
-- Extracts structured data when available
-- Supports image search capabilities
-
-Example usage:
-```python
-from app.tool import WebSearch
-
-# Initialize the web search tool
-search = WebSearch()
-
-# Perform a search
-result = await search.run(
-    query="latest developments in AI",
-    engine="google",
-    num_results=5
-)
-
-# Process results
-for item in result["results"]:
-    print(f"Title: {item['title']}")
-    print(f"URL: {item['url']}")
-    print(f"Snippet: {item['snippet']}")
-    print("---")
-```
-
-## 📝 String Replacement Tool
-
-The `StrReplaceEditor` tool provides powerful text manipulation capabilities:
-
-- Basic string replacement
-- Regular expression support
-- File content manipulation
-- Batch operations across multiple files
-- Interactive mode for confirmation
-- Undo/redo capability
-
-Example usage:
-```python
-from app.tool import StrReplaceEditor
-
-# Initialize the string replacement tool
-editor = StrReplaceEditor()
-
-# Replace in a single file
-result = await editor.run(
-    action="replace",
-    target_file="example.txt",
-    pattern="hello",
-    replacement="world",
-    use_regex=False
-)
-print(f"Replacements made: {result['count']}")
-
-# Replace with regex
-result = await editor.run(
-    action="replace",
-    target_file="code.py",
-    pattern=r"def (\w+)\(",
-    replacement=r"def renamed_\1(",
-    use_regex=True
-)
-```
-
-## 📊 Performance and Limits
-
-- **Memory Usage**: Typically requires 150-500MB RAM
-- **Disk Space**: ~200MB for core installation, additional space for cached data
-- **API Rate Limits**: Respects provider rate limits with exponential backoff
-- **Tool Execution**: Timeout protection for all tools (default 30s)
-- **Python Execution**: Sandboxed with memory and time limits
-- **Concurrent Operations**: Handles multiple simultaneous requests
-- **Response Size**: Manages large responses with chunking and streaming
-
-## 🔌 API Integration
-
-AgentRadis provides a comprehensive API for integration with other applications:
-
-```python
-import requests
-import json
-
-# Basic chat request
-response = requests.post(
-    "http://localhost:5001/api/v1/chat",
-    json={
-        "prompt": "Search for information about quantum computing",
-        "stream": False
-    },
-    headers={"Authorization": "Bearer your-api-key"}
-)
-result = response.json()
-
-# Tool execution request
-response = requests.post(
-    "http://localhost:5001/api/v1/tool",
-    json={
-        "tool": "web_search",
-        "params": {
-            "query": "quantum computing advances 2024",
-            "engine": "google"
-        }
-    },
-    headers={"Authorization": "Bearer your-api-key"}
-)
-search_result = response.json()
-
-# Streaming response
-with requests.post(
-    "http://localhost:5001/api/v1/chat",
-    json={"prompt": "Write a long essay about AI", "stream": True},
-    headers={"Authorization": "Bearer your-api-key"},
-    stream=True
-) as response:
-    for line in response.iter_lines():
-        if line:
-            chunk = json.loads(line.decode('utf-8'))
-            print(chunk["content"], end="", flush=True)
-```
-
-## 🙏 Acknowledgements
-
-AgentRadis draws inspiration from these outstanding projects:
-
-- [Open Manus](https://github.com/mannaandpoem/OpenManus) - An extensible AI agent system
-- [crawl4ai](https://github.com/openmapai/crawl4ai) - A web crawling framework for AI
-- [pixiv_ai](https://github.com/pixiv/pixiv-ai) - AI agent framework by Pixiv
-
 ## 👨‍💻 Author
 
 **Stanley Chisango** (@scooter-lacroix)
@@ -617,7 +649,7 @@ Features:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/AgentRadis_v2.git
+git clone https://github.com/scooter-lacroix/AgentRadis_v2.git
 cd AgentRadis_v2
 ```
 
