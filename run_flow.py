@@ -10,6 +10,7 @@ from app.flow.base import FlowType
 from app.flow.flow_factory import FlowFactory
 from app.logger import logger
 from app.config import config
+from app.tool.planning import PlanningTool
 import api
 from app.display import print_ascii_banner_with_stars, ArtifactDisplay
 
@@ -34,8 +35,9 @@ def print_help():
 async def run_flow_interactive():
     """Run the flow in interactive mode"""
     print_banner()
+    planning_tool = PlanningTool()
     agents = {
-        "radis": Radis(),
+        "radis": Radis(planning_tool=planning_tool),
     }
 
     try:
@@ -48,6 +50,7 @@ async def run_flow_interactive():
         flow = FlowFactory.create_flow(
             flow_type=FlowType.PLANNING,
             agents=agents,
+            planning_tool=planning_tool
         )
         logger.warning("Processing your request...")
 
@@ -85,10 +88,17 @@ def is_failed_search_response(response):
     return any(indicator in response for indicator in failed_indicators)
 
 # Then modify the run_flow_with_prompt function to handle failed searches
-async def run_flow_with_prompt(prompt, verbose=False, **kwargs):
+async def run_flow_with_prompt(prompt, verbose=False, planning_tool=None, **kwargs):
     """Run a flow with a specific prompt."""
+    # Import here to avoid circular imports
+    from app.tool.planning import PlanningTool
+    
+    # Ensure we have a valid PlanningTool instance
+    if planning_tool is None:
+        planning_tool = PlanningTool()
+        
     agents = {
-        "radis": Radis(),
+        "radis": Radis(planning_tool=planning_tool),
     }
     agent = agents["radis"]
 
@@ -104,6 +114,7 @@ async def run_flow_with_prompt(prompt, verbose=False, **kwargs):
         flow = FlowFactory.create_flow(
             flow_type=FlowType.PLANNING,
             agents=agents,
+            planning_tool=planning_tool
         )
         logger.warning(f"Processing request: {prompt}")
 
@@ -147,7 +158,7 @@ async def run_flow_with_prompt(prompt, verbose=False, **kwargs):
                 logger.error("Error: API format mismatch with tool calls. This may be due to LM Studio API compatibility issues.")
                 return "The LLM's response format is incompatible with the expected tool call format. Try updating to a newer version of the LLM API server."
             if "RetryError" in error_str and "APIConnectionError" in error_str:
-                logger.error("Error: Failed to connect to the LLM API after multiple retries.")
+                logger.error("Error: Failed to connect to the LLM API after multiple retries. Please check your API base URL and network connection.")
                 return "Could not establish a stable connection to the language model. Please check your API endpoint and network connection."
             # Re-raise for general handling
             raise

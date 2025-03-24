@@ -158,6 +158,12 @@ class Config:
         "os_version": platform.version(),
         "cpu_count": str(os.cpu_count()),
     })
+        "lm_studio": LLMConfig(
+            api_type="local",
+            model="fuseo1-qwq-deepseekr1-lightr1-32b",
+            base_url="http://127.0.0.1:1234/v1",
+            api_key="lm-studio"
+        ),
     
     # Core configurations
     llm: Dict[str, LLMConfig] = field(default_factory=lambda: {
@@ -175,15 +181,14 @@ class Config:
             api_type="mistral",
             model="mistralai/mistral-7b-instruct",
             fallback_model="mistralai/mistral-small"
-        ),
+        )
+    })
         "lm_studio": LLMConfig(
             api_type="local",
             model="fuseo1-qwq-deepseekr1-lightr1-32b",
-            api_base="http://127.0.0.1:1234/v1",
+            base_url="http://127.0.0.1:1234/v1",
             api_key="lm-studio"
-        )
-    })
-    
+        ),
     # Local LM Studio configuration
     active_llm: str = "lm_studio"
     

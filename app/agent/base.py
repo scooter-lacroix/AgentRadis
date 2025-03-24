@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.llm import LLM
 from app.logger import logger
-from app.schema import AgentState, AgentMemory, Message, ROLE_TYPE
+from app.schema import AgentState, AgentMemory, Message, ROLE_TYPE, ToolCall, ToolResponse, AgentResult, Status
 from app.tool.base import BaseTool
 
 
@@ -116,7 +116,7 @@ class BaseAgent(BaseModel, ABC):
         msg = msg_factory(content, **kwargs) if role == "tool" else msg_factory(content)
         self.memory.messages.append(msg)
 
-    async def run(self, prompt: str) -> Dict[str, Any]:
+    async def run(self, prompt: str) -> AgentResult:
         """
         Run the agent with a prompt.
         
@@ -124,9 +124,55 @@ class BaseAgent(BaseModel, ABC):
             prompt: The input prompt to process
             
         Returns:
-            Dict containing the response
+            AgentResult containing the response, memory state, iterations count, and status
         """
-        raise NotImplementedError("Subclasses must implement run()")
+        self.current_step = 0
+        self.memory.clear()  # Clear memory for a new run
+        self.state = AgentState.RUNNING
+
+        try:
+            # Process the prompt with the LLM
+            response = await self.llm.generate_response(prompt)
+            self.memory.add_message(role="user", content=prompt)
+
+            # Create a ToolCall and execute it if necessary
+            tool_call = ToolCall(function=Function(name="example_tool", arguments={"param": "value"}))
+            tool_response = await self.execute_tool(tool_call)
+
+            # Update memory with tool response
+            self.memory.add_observation(tool_response)
+
+            # Create and return the AgentResult
+            return AgentResult(
+                response=response,
+                success=True,
+                status=self.state,
+                memory=self.memory,
+                iterations=self.current_step,
+                error=None
+            )
+        except Exception as e:
+            logger.error(f"Error during agent run: {e}")
+            return AgentResult(
+                response="",
+                success=False,
+                status=AgentState.ERROR,
+                memory=self.memory,
+                iterations=self.current_step,
+                error=str(e)
+            )
+
+    async def execute_tool(self, tool_call: ToolCall) -> ToolResponse:
+        """Execute a tool call and return the response."""
+        # Implement tool execution logic here
+        # For example, call the tool and return a ToolResponse
+        return ToolResponse(
+            call_id=tool_call.id,
+            tool_name=tool_call.function.name,
+            success=True,
+            result={"data": "example result"},
+            error=None
+        )
 
     async def cleanup(self):
         """Clean up agent resources"""

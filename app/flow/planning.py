@@ -174,17 +174,48 @@ class PlanningFlow(BaseFlow):
         logger.warning("Creating default plan")
 
         # Create default plan using the ToolCollection
-        await self.planning_tool.execute(
-            **{
-                "command": "create",
-                "plan_id": self.active_plan_id,
-                "title": f"Plan for: {request[:50]}{'...' if len(request) > 50 else ''}",
-                "steps": ["Analyze request", "Execute task", "Verify results"],
+        try:
+            result = await self.planning_tool.execute(
+                **{
+                    "command": "create",
+                    "plan_id": self.active_plan_id,
+                    "title": f"Plan for: {request[:50]}{'...' if len(request) > 50 else ''}",
+                    "steps": ["Analyze request", "Execute task", "Verify results"],
+                }
+            )
+            logger.info(f"Default plan creation result: {str(result)}")
+            
+            # Return the plan from the planning tool's storage
+            if self.active_plan_id in self.planning_tool.plans:
+                return self.planning_tool.plans[self.active_plan_id]
+            else:
+                logger.warning(f"Plan with ID {self.active_plan_id} not found in plans dictionary after creation")
+                # Create and return a default plan structure
+                default_plan = {
+                    "id": self.active_plan_id,
+                    "title": f"Plan for: {request[:50]}{'...' if len(request) > 50 else ''}",
+                    "steps": ["Analyze request", "Execute task", "Verify results"],
+                    "step_statuses": ["not_started", "not_started", "not_started"],
+                    "step_notes": ["", "", ""],
+                    "created_at": time.time(),
+                    "updated_at": time.time()
+                }
+                # Store the default plan
+                self.planning_tool.plans[self.active_plan_id] = default_plan
+                return default_plan
+        except Exception as e:
+            logger.error(f"Error creating default plan: {str(e)}")
+            # Create and return an emergency fallback plan
+            fallback_plan = {
+                "id": self.active_plan_id,
+                "title": f"Emergency plan for: {request[:30]}{'...' if len(request) > 30 else ''}",
+                "steps": ["Process request directly"],
+                "step_statuses": ["not_started"],
+                "step_notes": ["Created as fallback due to planning error"],
+                "created_at": time.time(),
+                "updated_at": time.time()
             }
-        )
-        
-        # Return the default plan from storage
-        return self.planning_tool.plans[self.active_plan_id]
+            return fallback_plan
 
     async def _get_current_step_info(self) -> tuple[Optional[int], Optional[dict]]:
         """

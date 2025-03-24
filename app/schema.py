@@ -2,12 +2,14 @@
 Schema definitions for AgentRadis.
 
 This module contains Pydantic models that define the structure
-of data used throughout the application.
+of data used throughout the application, with enhanced context
+management and task handling capabilities.
 """
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Callable, Set
 import json
+import uuid
 
 from pydantic import BaseModel, Field, model_validator, validator, field_validator
 import uuid
@@ -21,6 +23,7 @@ class Status(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     PENDING = "pending"
+    PAUSED = "paused"  # Added for task suspension
 
 
 class ToolResult(BaseModel):
@@ -255,7 +258,7 @@ class AgentMemory(BaseModel):
     session_id: Optional[str] = Field(None, description="Current session ID")
     actions: List[Any] = Field(default_factory=list, description="Actions taken by the agent")
     observations: List[Any] = Field(default_factory=list, description="Observations from tools")
-    max_messages: int = 100
+    max_messages: int = Field(default=100, description="Maximum messages to store")
     
     def add_message(self, role: Role, content: Union[str, List[MessageContent]]) -> Message:
         """Add a message to the memory"""
@@ -293,6 +296,17 @@ class AgentMemory(BaseModel):
             if msg.content:
                 context.append(f"{msg.role}: {msg.content}")
         return "\n".join(context)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the memory to a dictionary representation."""
+        return {
+            "messages": [msg.to_dict() for msg in self.messages],
+            "context": self.context,
+            "session_id": self.session_id,
+            "actions": self.actions,
+            "observations": self.observations,
+            "max_messages": self.max_messages
+        }
 
 
 class AgentResult(BaseModel):
@@ -432,6 +446,232 @@ class Memory(BaseModel):
         """Clear all messages from memory"""
         self.messages = []
 
+# Workflow related classes
+class WorkflowStep(BaseModel):
+    """A step in a workflow"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this step")
+    name: str = Field(..., description="Name of the step")
+    description: str = Field(default="", description="Description of what this step does")
+    tool: str = Field(..., description="Tool to use for this step")
+    action: str = Field(..., description="Action to perform with the tool")
+    input_mapping: Dict[str, str] = Field(default_factory=dict, description="Mapping from workflow inputs to step inputs")
+    output_mapping: Dict[str, str] = Field(default_factory=dict, description="Mapping from step outputs to workflow outputs")
+    depends_on: List[str] = Field(default_factory=list, description="IDs of steps this step depends on")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "tool": self.tool,
+            "action": self.action,
+            "input_mapping": self.input_mapping,
+            "output_mapping": self.output_mapping,
+            "depends_on": self.depends_on
+        }
+
+
+class Workflow(BaseModel):
+    """A workflow definition"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this workflow")
+    name: str = Field(..., description="Name of the workflow")
+    description: str = Field(default="", description="Description of what this workflow does")
+    steps: List[WorkflowStep] = Field(default_factory=list, description="Steps in the workflow")
+    inputs: Dict[str, Any] = Field(default_factory=dict, description="Input schema for the workflow")
+    outputs: Dict[str, Any] = Field(default_factory=dict, description="Output schema for the workflow")
+    created_at: datetime = Field(default_factory=datetime.now, description="When the workflow was created")
+    updated_at: datetime = Field(default_factory=datetime.now, description="When the workflow was last updated")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "steps": [step.to_dict() for step in self.steps],
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+
+
+class WorkflowExecution(BaseModel):
+    """Execution instance of a workflow"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this execution")
+    workflow_id: str = Field(..., description="ID of the workflow being executed")
+    status: Status = Field(default=Status.RUNNING, description="Current status of the execution")
+    inputs: Dict[str, Any] = Field(default_factory=dict, description="Inputs provided to the workflow")
+    outputs: Dict[str, Any] = Field(default_factory=dict, description="Outputs produced by the workflow")
+    step_results: Dict[str, Any] = Field(default_factory=dict, description="Results for each step")
+    start_time: datetime = Field(default_factory=datetime.now, description="When the execution started")
+    end_time: Optional[datetime] = Field(None, description="When the execution ended")
+    error: Optional[str] = Field(None, description="Error message if execution failed")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "id": self.id,
+            "workflow_id": self.workflow_id,
+            "status": self.status,
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "step_results": self.step_results,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "error": self.error
+        }
+
+
+# Context management
+
+class ContextManager(BaseModel):
+    """Manages context for agents and workflows"""
+    variables: Dict[str, Any] = Field(default_factory=dict, description="Context variables")
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a context variable"""
+        return self.variables.get(key, default)
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set a context variable"""
+        self.variables[key] = value
+    
+    def update(self, values: Dict[str, Any]) -> None:
+        """Update multiple context variables"""
+        self.variables.update(values)
+    
+    def delete(self, key: str) -> None:
+        """Delete a context variable"""
+        if key in self.variables:
+            del self.variables[key]
+    
+    def clear(self) -> None:
+        """Clear all context variables"""
+        self.variables = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "variables": self.variables
+        }
+
+
+# Task management
+
+class TaskState(str, Enum):
+    """States a task can be in"""
+    PENDING = "pending"
+    SCHEDULED = "scheduled"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    PAUSED = "paused"
+
+
+class Task(BaseModel):
+    """A task to be executed"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this task")
+    name: str = Field(..., description="Name of the task")
+    description: str = Field(default="", description="Description of what this task does")
+    state: TaskState = Field(default=TaskState.PENDING, description="Current state of the task")
+    function: Optional[Callable] = Field(None, exclude=True, description="Function to execute")
+    function_name: str = Field(..., description="Name of the function to execute")
+    args: List[Any] = Field(default_factory=list, description="Positional arguments for the function")
+    kwargs: Dict[str, Any] = Field(default_factory=dict, description="Keyword arguments for the function")
+    result: Optional[Any] = Field(None, description="Result of the task execution")
+    error: Optional[str] = Field(None, description="Error message if task failed")
+    created_at: datetime = Field(default_factory=datetime.now, description="When the task was created")
+    started_at: Optional[datetime] = Field(None, description="When the task execution started")
+    completed_at: Optional[datetime] = Field(None, description="When the task execution completed")
+    dependencies: Set[str] = Field(default_factory=set, description="IDs of tasks this task depends on")
+    dependent_tasks: Set[str] = Field(default_factory=set, description="IDs of tasks that depend on this task")
+    retry_count: int = Field(default=0, description="Number of times this task has been retried")
+    max_retries: int = Field(default=3, description="Maximum number of retries allowed")
+    
+    @model_validator(mode='after')
+    def validate_task(self):
+        """Validate the task structure"""
+        if not self.function and not self.function_name:
+            raise ValueError("Either function or function_name must be provided")
+        return self
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation (excluding the function)"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "state": self.state,
+            "function_name": self.function_name,
+            "args": self.args,
+            "kwargs": self.kwargs,
+            "result": self.result,
+            "error": self.error,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "dependencies": list(self.dependencies),
+            "dependent_tasks": list(self.dependent_tasks),
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries
+        }
+
+
+class TaskManager(BaseModel):
+    """Manages tasks and their execution"""
+    tasks: Dict[str, Task] = Field(default_factory=dict, description="Dictionary of tasks by ID")
+    
+    def add_task(self, task: Task) -> str:
+        """Add a task to the manager"""
+        self.tasks[task.id] = task
+        return task.id
+    
+    def get_task(self, task_id: str) -> Optional[Task]:
+        """Get a task by ID"""
+        return self.tasks.get(task_id)
+    
+    def update_task(self, task: Task) -> None:
+        """Update a task"""
+        self.tasks[task.id] = task
+    
+    def remove_task(self, task_id: str) -> None:
+        """Remove a task"""
+        if task_id in self.tasks:
+            del self.tasks[task_id]
+    
+    def get_pending_tasks(self) -> List[Task]:
+        """Get all pending tasks"""
+        return [task for task in self.tasks.values() if task.state == TaskState.PENDING]
+    
+    def get_runnable_tasks(self) -> List[Task]:
+        """Get tasks that are ready to run (dependencies satisfied)"""
+        result = []
+        for task in self.tasks.values():
+            if task.state != TaskState.PENDING:
+                continue
+            
+            # Check if all dependencies are completed
+            can_run = True
+            for dep_id in task.dependencies:
+                dep_task = self.tasks.get(dep_id)
+                if not dep_task or dep_task.state != TaskState.COMPLETED:
+                    can_run = False
+                    break
+            
+            if can_run:
+                result.append(task)
+        
+        return result
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "tasks": {task_id: task.to_dict() for task_id, task in self.tasks.items()}
+        }
+
 # Export all models
 __all__ = [
     "Status", "ToolResult", "ToolCallType", "ToolCall", "ToolResponse",
@@ -440,5 +680,7 @@ __all__ = [
     "APIRequest", "APIResponse", "RunAgentRequest", "RunAgentResponse",
     "ToolRequest", "ToolResponse", "LLMRequest", "LLMResponse",
     "ToolChoice", "TOOL_CHOICE_VALUES", "TOOL_CHOICE_TYPE",
-    "ROLE_VALUES", "ROLE_TYPE", "Memory", "Function", "AgentResult"
+    "ROLE_VALUES", "ROLE_TYPE", "Memory", "Function", "AgentResult",
+    "WorkflowStep", "Workflow", "WorkflowExecution",
+    "ContextManager", "TaskState", "Task", "TaskManager"
 ]

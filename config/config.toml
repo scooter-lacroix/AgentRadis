@@ -1,148 +1,44 @@
 # Global LLM configuration
 [llm]
-model = "gemma-3-27b-it"
-api_base = "http://127.0.0.1:1234/v1"
+model = "fuseo1-qwq-deepseekr1-lightr1-32b"
 base_url = "http://127.0.0.1:1234/v1"
 api_key = "lm-studio"
-max_tokens = 8010
+max_tokens = 25317
 temperature = 0.1
-timeout = 60
-retry_attempts = 3
-streaming = true
 
-# Vision model configuration
+# [llm] #AZURE OPENAI:
+# api_type= 'azure'
+# model = "YOUR_MODEL_NAME" #"gpt-4o-mini"
+# base_url = "{YOUR_AZURE_ENDPOINT.rstrip('/')}/openai/deployments/{AZURE_DEPOLYMENT_ID}"
+# api_key = "AZURE API KEY"
+# max_tokens = 8096
+# temperature = 0.0
+# api_version="AZURE API VERSION" #"2024-08-01-preview"
+
+# Optional configuration for specific LLM models
 [llm.vision]
 model = "gemma-3-4b-it"
-api_base = "http://127.0.0.1:1234/v1"
 base_url = "http://127.0.0.1:1234/v1"
 api_key = "lm-studio"
-max_tokens = 4096
-detail_level = "high"
 
-# Alternative LLM providers
-[llm.providers.openai]
-enabled = false
-model = "gpt-4-turbo"
-api_key = ""
-base_url = "https://api.openai.com/v1"
-max_tokens = 4096
-temperature = 0.0
+# Optional configuration for specific browser configuration
+ [browser]
+# Whether to run browser in headless mode (default: false)
+headless = false
+# Disable browser security features (default: true)
+disable_security = true
+# Extra arguments to pass to the browser
+#extra_chromium_args = []
+# Path to a Chrome instance to use to connect to your normal browser
+# e.g. '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+chrome_instance_path = "/usr/bin/chromium"
+# Connect to a browser instance via WebSocket
+#wss_url = ""
+# Connect to a browser instance via CDP
+#cdp_url = ""
 
-[llm.providers.anthropic]
-enabled = false
-model = "claude-3-opus-20240229"
-api_key = ""
-base_url = "https://api.anthropic.com"
-max_tokens = 4096
-temperature = 0.0
-
-[llm.providers.azure]
-enabled = false
-model = "gpt-4"
-api_key = ""
-endpoint = "https://your-endpoint.openai.azure.com/"
-api_version = "2023-05-15"
-deployment_id = "your-deployment-id"
-max_tokens = 4096
-temperature = 0.0
-
-[llm.providers.local]
-enabled = true
-model = "gemma-3-27b-it"
-base_url = "http://127.0.0.1:1234/v1"
-api_key = "lm-studio"
-max_tokens = 8010
-temperature = 0.1
-
-# Browser configuration
-[browser]
-headless = true
-chrome_instance_path = "/usr/bin/firefox"
-disable_security = false
-extra_chromium_args = ["--headless", "--disable-gpu"]
+# Optional configuration, Proxy settings for the browser
 # [browser.proxy]
 # server = "http://proxy-server:port"
 # username = "proxy-username"
 # password = "proxy-password"
-
-# MCP app store settings
-[mcp]
-enabled = true
-server_url = "http://localhost:5004"
-install_dir = "./mcp_apps"
-auto_update = true
-verify_signatures = true
-
-# Speech tool settings
-[speech]
-enabled = true
-stt_model = "tiny.en"
-stt_engine = "whisper"
-tts_model = "tts-1"
-tts_voice = "alloy"
-auto_transcribe = false
-language = "en"
-sample_rate = 16000
-silence_threshold = 0.1
-silence_duration = 1.0
-
-# Web search configuration
-[web_search]
-enabled = true
-default_engine = "google"
-engines = ["google", "bing", "duckduckgo", "brave"]
-cache_results = true
-cache_ttl = 300
-max_results = 10
-timeout = 30
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-
-# Tool-specific settings
-[tools]
-allow_terminal = true
-allow_python_exec = true
-allow_file_access = true
-show_hidden_files = false
-sudo_allowed = false
-max_file_size = 10485760
-restricted_paths = ["/etc", "/var"]
-allowed_python_modules = ["os", "sys", "re", "json", "requests", "numpy", "pandas"]
-
-# Agent behavior settings
-[agent]
-max_steps = 100
-memory_limit = 50
-tool_choice = "auto"
-system_prompt = "You are a helpful AI assistant with access to various tools."
-default_agent = "radis"
-timeout = 300
-verbose_logging = true
-keep_history = true
-
-# Web interface settings
-[web]
-enabled = true
-host = "0.0.0.0"
-port = 5000
-debug = false
-require_auth = false
-theme = "dark"
-max_upload_size = 52428800
-
-# API settings
-[api]
-enabled = true
-host = "0.0.0.0"
-port = 5001
-debug = false
-require_auth = true
-rate_limit = 100
-cors_origins = ["http://localhost:3000", "https://yourapp.com"]
-
-# Logging configuration
-[logging]
-level = "INFO"
-log_file = "logs/agent.log"
-max_size = 10485760
-backup_count = 5
-format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

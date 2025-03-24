@@ -1,14 +1,17 @@
 import time
 from typing import Dict, List, Optional
+from datetime import datetime
 
 from pydantic import Field, model_validator
 
 from app.agent.toolcall import ToolCallAgent
 from app.logger import logger
 from app.prompt.planning import NEXT_STEP_PROMPT, PLANNING_SYSTEM_PROMPT
-from app.schema import Message, TOOL_CHOICE_TYPE, ToolCall, ToolChoice
+from app.schema import Message, TOOL_CHOICE_TYPE, ToolCall, ToolChoice, Workflow, WorkflowExecution, TaskManager, Task, TaskState, ContextManager
 from app.tool import PlanningTool, Terminate, ToolCollection
 
+# Fixed SYSTEM_PROMPT definition - removed f-string prefix
+SYSTEM_PROMPT = "Your system prompt here"  # Ensure this line exists
 
 class PlanningAgent(ToolCallAgent):
     """
@@ -27,17 +30,18 @@ class PlanningAgent(ToolCallAgent):
     available_tools: ToolCollection = Field(
         default_factory=lambda: ToolCollection(PlanningTool(), Terminate())
     )
-    tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO # type: ignore
+    tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
 
     tool_calls: List[ToolCall] = Field(default_factory=list)
     active_plan_id: Optional[str] = Field(default=None)
 
-    # Add a dictionary to track the step status for each tool call
-    step_execution_tracker: Dict[str, Dict] = Field(default_factory=dict)
+    # Use TaskManager for structured step tracking
+    task_manager: TaskManager = Field(default_factory=TaskManager, description="Manages tasks for the planning agent")
     current_step_index: Optional[int] = None
 
     max_steps: int = 100
+    context_manager: ContextManager = Field(default_factory=ContextManager, description="Manages context for the planning agent")
 
     @model_validator(mode="after")
     def initialize_plan_and_verify_tools(self) -> "PlanningAgent":
@@ -72,11 +76,15 @@ class PlanningAgent(ToolCallAgent):
                 and latest_tool_call.function.name not in self.special_tool_names
                 and self.current_step_index is not None
             ):
-                self.step_execution_tracker[latest_tool_call.id] = {
-                    "step_index": self.current_step_index,
-                    "tool_name": latest_tool_call.function.name,
-                    "status": "pending",  # Will be updated after execution
-                }
+                task = Task(
+                    id=latest_tool_call.id,
+                    name=latest_tool_call.function.name,
+                    description="Executing tool call",
+                    state=TaskState.QUEUED,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                )
+                self.task_manager.add_task(task)
 
         return result
 
@@ -89,9 +97,10 @@ class PlanningAgent(ToolCallAgent):
             latest_tool_call = self.tool_calls[0]
 
             # Update the execution status to completed
-            if latest_tool_call.id in self.step_execution_tracker:
-                self.step_execution_tracker[latest_tool_call.id]["status"] = "completed"
-                self.step_execution_tracker[latest_tool_call.id]["result"] = result
+            if latest_tool_call.id in self.task_manager.tasks:
+                task = self.task_manager.get_task(latest_tool_call.id)
+                task.update_state(TaskState.COMPLETED)
+                task.result = result
 
                 # Update the plan status if this was a non-planning, non-special tool
                 if (
@@ -127,16 +136,14 @@ class PlanningAgent(ToolCallAgent):
         if not self.active_plan_id:
             return
 
-        if tool_call_id not in self.step_execution_tracker:
-            logger.warning(f"No step tracking found for tool call {tool_call_id}")
+        if tool_call_id not in self.task_manager.tasks:
+            logger.warning(f"No task tracking found for tool call {tool_call_id}")
             return
 
-        tracker = self.step_execution_tracker[tool_call_id]
-        if tracker["status"] != "completed":
-            logger.warning(f"Tool call {tool_call_id} has not completed successfully")
+        task = self.task_manager.get_task(tool_call_id)
+        if task.state != TaskState.COMPLETED:
+            logger.warning(f"Task {tool_call_id} has not completed successfully")
             return
-
-        step_index = tracker["step_index"]
 
         try:
             # Mark the step as completed
@@ -145,12 +152,12 @@ class PlanningAgent(ToolCallAgent):
                 tool_input={
                     "command": "mark_step",
                     "plan_id": self.active_plan_id,
-                    "step_index": step_index,
+                    "step_index": self.current_step_index,
                     "step_status": "completed",
                 },
             )
             logger.info(
-                f"Marked step {step_index} as completed in plan {self.active_plan_id}"
+                f"Marked step {self.current_step_index} as completed in plan {self.active_plan_id}"
             )
         except Exception as e:
             logger.warning(f"Failed to update plan status: {e}")

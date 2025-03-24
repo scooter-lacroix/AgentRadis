@@ -71,7 +71,7 @@ async def make_llm_request(endpoint: str, data: Dict[str, Any], api_base: Option
             response = await client.post(
                 f"{api_base}{endpoint}",
                 json=data,
-                timeout=30.0  # 30 second timeout
+                timeout=60.0  # Increased timeout to 60 seconds
             )
             
             response.raise_for_status()

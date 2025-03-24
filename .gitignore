@@ -196,7 +196,6 @@ check_tomli.py
 fix_indentation.py
 fixed_radis.py
 start_agentradis.py
-run.sh
 
 # Unrelated projects and directories
 Manus/

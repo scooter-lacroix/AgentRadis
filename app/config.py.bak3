@@ -1,0 +1,192 @@
+"""
+Configuration module for AgentRadis.
+
+This module handles configuration loading, validation, and provides defaults
+for all AgentRadis components.
+"""
+import os
+import sys
+import json
+import logging
+import tomli
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Union, Any
+from enum import Enum
+import platform
+
+# Default configuration paths
+DEFAULT_CONFIG_PATH = "config.json"
+USER_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".agentradis")
+USER_CONFIG_PATH = os.path.join(USER_CONFIG_DIR, "config.json")
+ENV_CONFIG_PATH = os.getenv("AGENTRADIS_CONFIG", "")
+
+# TOML Configuration paths
+DEFAULT_TOML_PATH = "config/config.toml"
+USER_TOML_PATH = os.path.join(USER_CONFIG_DIR, "config.toml")
+ENV_TOML_PATH = os.getenv("AGENTRADIS_TOML_CONFIG", "")
+
+# Environment variable prefixes
+ENV_PREFIX = "AGENTRADIS_"
+
+
+class LogLevel(Enum):
+    """Log level enum for configuration"""
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for LLM providers"""
+    # Default model to use
+    model: str = "mistralai/mistral-7b-instruct"
+    # Default model for fallback
+    fallback_model: Optional[str] = None
+    # API key (can be overridden by env var)
+    api_key: str = ""
+    # API endpoint
+    api_base: str = "http://127.0.0.1:1234/v1"
+    # API type (openai, mistral, anthropic, etc.)
+    api_type: str = "mistral"
+    # Maximum tokens to generate
+    max_tokens: int = 4096
+    # Temperature for generation
+    temperature: float = 0.7
+    # Maximum retries on failure
+    max_retries: int = 3
+    # Timeout in seconds
+    timeout: float = 120.0
+    # Whether to stream responses
+    stream: bool = False
+    
+    def __post_init__(self):
+        # Check for environment variables
+        if not self.api_key:
+            env_var = f"{ENV_PREFIX}{self.api_type.upper()}_API_KEY"
+            self.api_key = os.getenv(env_var, "")
+
+
+@dataclass
+class WebSearchConfig:
+    """Configuration for web search tools"""
+    # Whether to auto-initialize engines
+    auto_init: bool = True
+    # Default search engine
+    default_engine: str = "google"
+    # Default number of results
+    default_results: int = 8
+    # Enable/disable specific engines
+    engines_enabled: Dict[str, bool] = field(default_factory=lambda: {
+        "google": True,
+        "duckduckgo": True,
+        "baidu": False
+    })
+    # Cache settings
+    cache_enabled: bool = True
+    cache_duration: int = 3600  # seconds
+
+
+@dataclass
+class BrowserConfig:
+    """Configuration for browser automation"""
+    # Whether to run headless
+    headless: bool = True
+    # Browser executable path
+    executable_path: str = ""
+    # Default timeout
+    timeout: float = 60.0
+    # Whether to use stealth mode
+    stealth_mode: bool = True
+    # User agent to use (empty for default)
+    user_agent: str = ""
+    # Maximum page load time
+    max_page_load_time: float = 30.0
+    # Maximum browser instances
+    max_instances: int = 3
+
+
+@dataclass
+class AgentConfig:
+    """Configuration for agent behavior"""
+    # Maximum iterations in a loop
+    max_iterations: int = 25
+    # Maximum execution time in seconds
+    max_execution_time: float = 300.0
+    # Maximum consecutive empty responses
+    max_consecutive_empty: int = 5
+    # Maximum consecutive errors
+    max_consecutive_errors: int = 3
+    # Memory settings
+    memory_limit: int = 50  # Number of recent messages to keep
+    # Planning enabled
+    planning_enabled: bool = True
+    # Whether to use structured tools
+    structured_tools: bool = True
+
+
+@dataclass
+class LoggingConfig:
+    """Configuration for logging"""
+    # Log level
+    level: LogLevel = LogLevel.INFO
+    # Log file path (empty for stdout only)
+    file_path: str = ""
+    # Log format
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # Whether to log to console
+    console: bool = True
+    # Maximum log file size in MB
+    max_file_size: int = 10
+    # Maximum number of backup files
+    backup_count: int = 3
+
+
+@dataclass
+class Config:
+    """Main configuration class for AgentRadis"""
+    # Meta configuration
+    app_name: str = "AgentRadis"
+    version: str = "0.2.0"
+    
+    # System information
+    system_info: Dict[str, str] = field(default_factory=lambda: {
+        "python_version": platform.python_version(),
+        "os": platform.system(),
+        "os_version": platform.version(),
+        "cpu_count": str(os.cpu_count()),
+    })
+        "lm_studio": LLMConfig(
+            api_type="local",
+            model="fuseo1-qwq-deepseekr1-lightr1-32b",
+            base_url="http://127.0.0.1:1234/v1",
+            api_key="lm-studio"
+        ),
+    
+    # Core configurations
+    llm: Dict[str, LLMConfig] = field(default_factory=lambda: {
+    llm: Dict[str, LLMConfig] = field(default_factory=lambda: {
+        "openai": LLMConfig(
+            api_type="openai",
+            model="gpt-4-turbo-preview",
+            fallback_model="gpt-3.5-turbo-0125"
+        ),
+        "anthropic": LLMConfig(
+            api_type="anthropic",
+            model="claude-3-opus-20240229",
+            fallback_model="claude-3-sonnet-20240229"
+        ),
+        "mistral": LLMConfig(
+            api_type="mistral",
+            model="mistralai/mistral-7b-instruct",
+            fallback_model="mistralai/mistral-small"
+        ),
+        "lm_studio": LLMConfig(
+            api_type="local",
+            model="fuseo1-qwq-deepseekr1-lightr1-32b",
+            api_base="http://127.0.0.1:1234/v1",
+            api_key="lm-studio"
+        )
+    })

@@ -45,7 +45,16 @@ class ChatResponse(BaseModel):
     error: Optional[str] = None
 
 # Create a global Radis instance
-radis_agent = EnhancedRadis()
+radis_agent = None
+
+async def initialize_agent():
+    return await EnhancedRadis()
+
+async def get_radis_agent():
+    global radis_agent
+    if radis_agent is None:
+        radis_agent = await EnhancedRadis()
+    return radis_agent
 
 # In-memory storage for tracking tool usage and files
 tools_used = []
@@ -117,7 +126,8 @@ async def chat(request: ChatRequest):
         logger.info(f"Received chat request: {prompt}")
 
         # Process with Radis agent - now expecting a dictionary
-        result = await radis_agent.run(prompt, mode=request.mode)
+        agent = await get_radis_agent()
+        result = await agent.run(prompt, mode=request.mode)
 
         # Handle both string responses and dictionary results
         if isinstance(result, dict):
@@ -207,13 +217,30 @@ def collect_tool_usage():
         # Don't re-raise, just continue with empty collections
 
 # Function to start the API server
-def start_api_server(host="0.0.0.0", port=5000):
+async def start_api_server(host="0.0.0.0", port=5000):
     """Start the FastAPI server with uvicorn"""
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    import uvicorn
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 # Run the app with uvicorn when script is executed directly
+async def main():
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Start the AgentRadis API server')
+    parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
+    parser.add_argument('--host', type=str, default="0.0.0.0", help='Host to run the server on')
+    
+    args = parser.parse_args()
+    
+    print(f"Starting AgentRadis API server on {args.host}:{args.port}")
+    await start_api_server(host=args.host, port=args.port)
+
 if __name__ == "__main__":
+    asyncio.run(main())
     import argparse
     
     # Parse command line arguments

@@ -70,33 +70,34 @@ class Radis(BaseAgent):
     next_step_prompt: Optional[str] = NEXT_STEP_PROMPT
     tools: List[BaseTool] = []
 
-    def __init__(self, tools: Optional[List[BaseTool]] = None, api_base: Optional[str] = None, **kwargs):
+    def __init__(self, tools: Optional[List[BaseTool]] = None, api_base: Optional[str] = None, planning_tool=None, **kwargs):
         """Initialize the agent with memory, state tracking, and tools"""
         super().__init__(**kwargs)
-        
+
         # Core components
         self.memory = AgentMemory()
         self.state = AgentState.IDLE
         self._active_resources = []
         self.iteration_count = 0
-        
+
         # Initialize tools
         self.tools = tools or []
         self.api_base = api_base
-        
+        self.planning_tool = planning_tool
+
         if not self.tools:
             self._initialize_tools()
-            
+
     def _initialize_tools(self):
         """Initialize all available tools."""
         self.tools = []
-        
+
         try:
             # Initialize web search first to ensure it's available
             web_search = WebSearch()
             self.tools.append(web_search)
             logger.info("Added WebSearch tool")
-            
+
             # Initialize other basic tools
             basic_tools = [
                 FileSaver(),
@@ -105,9 +106,14 @@ class Radis(BaseAgent):
                 PythonTool(),
                 WebTool(),
                 Terminate(),
-                SudoTool()
+                SudoTool(),
             ]
-            
+
+            # Add planning tool if available
+            if self.planning_tool:
+                self.tools.append(self.planning_tool)
+                logger.info("Added PlanningTool")
+
             for tool in basic_tools:
                 try:
                     self.tools.append(tool)
@@ -115,13 +121,13 @@ class Radis(BaseAgent):
                 except Exception as e:
                     logger.error(f"Error initializing {tool.__class__.__name__}: {str(e)}")
                     continue
-            
+
             logger.info(f"Initialized {len(self.tools)} tools")
-            
+
         except Exception as e:
             logger.error(f"Error initializing tools: {e}")
             self.tools = []  # Reset tools list on error
-        
+
     def _load_mcp_servers(self):
         """Load installed MCP servers"""
         try:

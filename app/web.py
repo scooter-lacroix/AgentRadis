@@ -27,7 +27,7 @@ async def initialize_agent(api_base: Optional[str] = None):
     try:
         if agent is None:
             logger.info("Initializing EnhancedRadis agent for web interface")
-            agent = EnhancedRadis()
+            agent = await EnhancedRadis()
             
             # Set up environment variables for tools
             os.environ['PYTHONPATH'] = os.getcwd()

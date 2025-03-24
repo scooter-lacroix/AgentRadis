@@ -1,0 +1,25 @@
+{
+    "memory": {
+        "actions": [],
+        "context": {},
+        "max_messages": 100,
+        "messages": [
+            {
+                "content": "You are EnhancedRadis in action mode",
+                "role": "system"
+            },
+            {
+                "content": "hi",
+                "role": "user"
+            },
+            {
+                "content": "Hello! How can I assist you today?\n<|box_end|>\n\n{\"name\": \"terminate\", \"arguments\": {\"message\": \"Hello! How can I assist you today?\"}}",
+                "role": "assistant"
+            }
+        ],
+        "observations": [],
+        "session_id": null
+    },
+    "mode": "act",
+    "system_prompt": "You are EnhancedRadis in action mode"
+}
