@@ -610,7 +610,7 @@ export RADIS_SPEECH_TTS_VOICE="alloy"
 ## 👨‍💻 作者
 
 **Stanley Chisango** (@scooter-lacroix)
-- 📧 メール: theslick.stan@gmail.com
+- 📧 メール: scooterlacroix@gmail.com
 - 🌐 GitHub: [scooter-lacroix](https://github.com/scooter-lacroix)
 
 ## 📄 ライセンス
