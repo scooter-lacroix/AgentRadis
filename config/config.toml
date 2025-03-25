@@ -1,8 +1,8 @@
 # Global LLM configuration
 [llm]
 model = "gemma-3-27b-it"
-api_base = "http://127.0.0.1:1234/v1"
-base_url = "http://127.0.0.1:1234/v1"
+api_base = "http://localhost:1234/v1"
+base_url = "http://localhost:1234/v1"
 api_key = "lm-studio"
 max_tokens = 8010
 temperature = 0.1
@@ -13,8 +13,8 @@ streaming = true
 # Vision model configuration
 [llm.vision]
 model = "gemma-3-4b-it"
-api_base = "http://127.0.0.1:1234/v1"
-base_url = "http://127.0.0.1:1234/v1"
+api_base = "http://localhost:1234/v1"
+base_url = "http://localhost:1234/v1"
 api_key = "lm-studio"
 max_tokens = 4096
 detail_level = "high"
@@ -49,7 +49,7 @@ temperature = 0.0
 [llm.providers.local]
 enabled = true
 model = "gemma-3-27b-it"
-base_url = "http://127.0.0.1:1234/v1"
+base_url = "http://localhost:1234/v1"
 api_key = "lm-studio"
 max_tokens = 8010
 temperature = 0.1
