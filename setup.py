@@ -5,14 +5,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="agentradis",
+    name="AgenRadis",
     version="0.2.0",
     author="AgentRadis Team",
     author_email="",
     description="A flexible AI agent system with tool integration",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/agentradis/AgentRadis",
+    url="https://github.com/scooter-lacroix/AgentRadis",
     packages=find_packages(),
     install_requires=[
         "pydantic~=2.10.4",
