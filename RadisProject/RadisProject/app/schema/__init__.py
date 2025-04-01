@@ -1,0 +1,4 @@
+"""
+Schema module initialization.
+"""
+

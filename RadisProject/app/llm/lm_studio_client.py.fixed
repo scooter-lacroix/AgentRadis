@@ -1,0 +1,480 @@
+"""
+LM Studio Client Implementation
+
+This module provides a client for interacting with LM Studio models using both:
+1. The OpenAI-compatible API
+2. The native lmstudio-python SDK
+
+The client supports chat completions, tool-based interactions, and embeddings
+with proper error handling and logging.
+"""
+
+import json
+import logging
+import os
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+try:
+    import lmstudio
+    LMSTUDIO_SDK_AVAILABLE = True
+except ImportError:
+    LMSTUDIO_SDK_AVAILABLE = False
+    logging.warning("lmstudio-python SDK not found. Falling back to OpenAI-compatible API.")
+
+from openai import OpenAI
+
+from app.config import config
+from app.schema.models import Message, ToolCall, ToolResponse as ToolCallResponse
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+class LMStudioClient:
+    """
+    Client for interacting with LM Studio models using either the OpenAI-compatible API
+    or the native lmstudio-python SDK.
+    
+    This client provides methods for chat completion, tool-based interactions, and embeddings.
+    """
+
+    def __init__(self, config_dict: Optional[Dict[str, Any]] = None):
+        """
+        Initialize the LM Studio client with configuration.
+        
+        Args:
+            config_dict: Optional configuration dictionary. If not provided, 
+                   will use 'lm_studio' configuration from the app config.
+        """
+        if config_dict is None:
+            # Use the config instance's llm_settings
+            if "lm_studio" in config.llm_settings:
+                llm_config = config.llm_settings["lm_studio"]
+                self.config = {
+                    "api_type": llm_config.api_type,
+                    "model": llm_config.model,
+                    "api_base": llm_config.api_base,
+                    "api_key": llm_config.api_key,
+                    "timeout": llm_config.timeout
+                }
+            else:
+                # Fallback to default config
+                self.config = {
+                    "api_type": "local",
+                    "model": "", 
+                    "api_base": "http://127.0.0.1:1234/",
+                    "api_key": "lm-studio",
+                    "timeout": 60
+                }
+        else:
+            self.config = config_dict
+        
+        # Extract configuration values
+        self.api_type = self.config.get("api_type", "local")
+        self.model = self.config.get("model", "")
+        self.api_base = self.config.get("api_base", "http://127.0.0.1:1234/")
+        self.api_key = self.config.get("api_key", "lm-studio")
+        self.timeout = self.config.get("timeout", 60)
+        
+        # Initialize clients based on availability and configuration
+        self._openai_client = None
+        self._lmstudio_client = None
+        
+        self._initialize_clients()
+    
+    def _initialize_clients(self):
+        """Initialize API clients based on configuration and SDK availability."""
+        # Always initialize OpenAI client as fallback
+        self._openai_client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            timeout=self.timeout
+        )
+        # Initialize lmstudio client if SDK is available
+        if LMSTUDIO_SDK_AVAILABLE:
+            try:
+                # Process API base URL - we need to extract the hostname only
+                # as the SDK will add the websocket protocol and endpoint path
+                api_host = self.api_base.rstrip('/')  # Remove trailing '/'
+                
+                # Extract the host without protocol prefix
+                if api_host.startswith('http://'):
+                    api_host = api_host.replace('http://', '')
+                elif api_host.startswith('https://'):
+                    api_host = api_host.replace('https://', '')
+                
+                # Remove any path components like /v1
+                if '/' in api_host:
+                    api_host = api_host.split('/')[0]
+                
+                try:
+                    self._lmstudio_client = lmstudio.Client(api_host=api_host)
+                    logger.info(f"Initialized LM Studio client with host: {api_host}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize LM Studio client: {e}")
+                    self._lmstudio_client = None
+
+                # Load the specified model
+                if self.model:
+                    try:
+                        # FIX: Use llm.connect(model) instead of load_model
+                        self._lmstudio_client.llm.connect(self.model)
+                        logger.info(f"Connected to LM Studio model: {self.model}")
+                    except Exception as model_err:
+                        logger.warning(f"Could not connect to model '{self.model}': {model_err}. Using default model.")
+                else:
+                    # If no model specified, try to use any already loaded model
+                    try:
+                        loaded_models = self._lmstudio_client.list_loaded_models()
+                        if loaded_models:
+                            model_name = loaded_models[0].get('name', '')
+                            if model_name:
+                                self._lmstudio_client.llm.connect(model_name)
+                                logger.info(f"Connected to already loaded model: {model_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to connect to any model: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize LM Studio SDK client: {e}")
+                self._lmstudio_client = None
+    
+    def use_sdk(self) -> bool:
+        """
+        Determine whether to use the native SDK or fallback to OpenAI API.
+        
+        Returns:
+            bool: True if SDK should be used, False otherwise.
+        """
+        return (LMSTUDIO_SDK_AVAILABLE and 
+               self._lmstudio_client is not None and 
+               hasattr(self._lmstudio_client, 'llm') and 
+               getattr(self._lmstudio_client.llm, 'connected', False))
+    
+    def create_chat_completion(
+        self, 
+        messages: List[Message], 
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs
+    ) -> Tuple[str, Optional[List[ToolCall]]]:
+        """
+        Create a chat completion using either the SDK or OpenAI-compatible API.
+        
+        Args:
+            messages: List of message objects with role and content
+            tools: Optional list of tools available to the model
+            **kwargs: Additional parameters to pass to the underlying API
+        
+        Returns:
+            Tuple[str, Optional[List[ToolCall]]]: The model's response text and any tool calls
+        """
+        if self.use_sdk():
+            return self._create_chat_completion_sdk(messages, tools, **kwargs)
+        else:
+            return self._create_chat_completion_openai(messages, tools, **kwargs)
+    
+    def _create_chat_completion_sdk(
+        self, 
+        messages: List[Message], 
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs
+    ) -> Tuple[str, Optional[List[ToolCall]]]:
+        """
+        Create a chat completion using the native lmstudio-python SDK.
+        
+        Args:
+            messages: List of message objects with role and content
+            tools: Optional list of tools available to the model
+            **kwargs: Additional parameters to pass to the SDK
+        
+        Returns:
+            Tuple[str, Optional[List[ToolCall]]]: The model's response text and any tool calls
+        """
+        try:
+            # Extract conversation context from messages
+            prompt = ""
+            for msg in messages:
+                role_prefix = ""
+                if msg.role == "user":
+                    role_prefix = "User: "
+                elif msg.role == "assistant":
+                    role_prefix = "Assistant: "
+                elif msg.role == "system":
+                    role_prefix = "System: "
+                
+                if msg.content:
+                    prompt += f"{role_prefix}{msg.content}\n"
+            
+            prompt += "Assistant: "  # Add prompt for assistant response
+            
+            # FIX: Use the correct method to get completions
+            try:
+                # Try the direct _complete method first
+                result = self._lmstudio_client.llm._complete(
+                    prompt=prompt,
+                    max_tokens=kwargs.get("max_tokens", 1024),
+                    temperature=kwargs.get("temperature", 0.7),
+                    stop=kwargs.get("stop", None)
+                )
+                if result and isinstance(result, dict) and "text" in result:
+                    return result["text"], None
+                else:
+                    # Handle unexpected response format
+                    logger.warning(f"Unexpected response format from SDK: {result}")
+                    return str(result) if result else "", None
+                    
+            except AttributeError:
+                # Fallback to remote_call if _complete is not available
+                logger.info("Using remote_call for completion")
+                response = self._lmstudio_client.llm.remote_call(
+                    method="_complete",
+                    kwargs={
+                        "prompt": prompt,
+                        "max_tokens": kwargs.get("max_tokens", 1024),
+                        "temperature": kwargs.get("temperature", 0.7),
+                        "stop": kwargs.get("stop", None)
+                    })
+
+                
+                if isinstance(response, dict) and "text" in response:
+                    return response["text"], None
+                else:
+                    return str(response) if response else "", None
+                
+        except Exception as e:
+            logger.error(f"Error in LM Studio SDK chat completion: {e}")
+            # Fallback to OpenAI API
+            logger.info("Falling back to OpenAI-compatible API")
+            return self._create_chat_completion_openai(messages, tools, **kwargs)
+    
+    def _create_chat_completion_openai(
+        self, 
+        messages: List[Message], 
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs
+    ) -> Tuple[str, Optional[List[ToolCall]]]:
+        """
+        Create a chat completion using the OpenAI-compatible API.
+        
+        Args:
+            messages: List of message objects with role and content
+            tools: Optional list of tools available to the model
+            **kwargs: Additional parameters to pass to the API
+        
+        Returns:
+            Tuple[str, Optional[List[ToolCall]]]: The model's response text and any tool calls
+        """
+        try:
+            # Convert messages to OpenAI format
+            openai_messages = [
+                {"role": msg.role, "content": msg.content if msg.content else ""} 
+                for msg in messages
+            ]
+            
+            # Set up request parameters
+            request_params = {
+                "model": kwargs.get("model", self.model) or "default",
+                "messages": openai_messages,
+            }
+            
+            # Add any additional kwargs
+            for key, value in kwargs.items():
+                if key != "model":  # Skip model as we've already processed it
+                    request_params[key] = value
+            
+            # Add tools if provided
+            if tools:
+                request_params["tools"] = tools
+            
+            # Make API call
+            response = self._openai_client.chat.completions.create(**request_params)
+            
+            # Check if the model wants to use a tool
+            if response.choices and hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+                # Convert to ToolCall format
+                tool_calls = []
+                for tc in response.choices[0].message.tool_calls:
+                    try:
+                        arguments = tc.function.arguments
+                        # Ensure arguments is a valid JSON string
+                        json.loads(arguments)
+                    except (ValueError, AttributeError):
+                        arguments = "{}"
+                        
+                    tool_call = ToolCall(
+                        id=tc.id,
+                        type="function",
+                        function={
+                            "name": tc.function.name,
+                            "arguments": arguments
+                        }
+                    )
+                    tool_calls.append(tool_call)
+                
+                return "", tool_calls
+            
+            # If no tool calls, return the content
+            content = ""
+            if response.choices and hasattr(response.choices[0].message, 'content'):
+                content = response.choices[0].message.content or ""
+            return content, None
+            
+        except Exception as e:
+            logger.error(f"Error in OpenAI-compatible chat completion: {e}")
+            # Return empty response instead of raising exception for robustness
+            return "I encountered an error while processing your request.", None
+    
+    def create_completion_with_tools(
+        self,
+        messages: List[Message],
+        tools: List[Dict[str, Any]],
+        tool_choice: str = "auto",
+        **kwargs
+    ) -> Tuple[str, Optional[List[ToolCall]]]:
+        """
+        Create a completion with tools available to the model.
+        
+        Args:
+            messages: List of message objects
+            tools: List of tools available to the model
+            tool_choice: Whether to force tool use or leave it to the model
+            **kwargs: Additional parameters to pass to the API
+        
+        Returns:
+            Tuple[str, Optional[List[ToolCall]]]: The model's response text and any tool calls
+        """
+        if tool_choice != "auto":
+            kwargs["tool_choice"] = tool_choice
+            
+        return self.create_chat_completion(messages, tools, **kwargs)
+    
+    def handle_tool_calls(
+        self,
+        messages: List[Message],
+        tool_calls: List[ToolCall],
+        tool_results: List[ToolCallResponse],
+        **kwargs
+    ) -> Tuple[str, Optional[List[ToolCall]]]:
+        """
+        Handle tool call responses and continue the conversation.
+        
+        Args:
+            messages: Original conversation messages
+            tool_calls: Tool calls made by the model
+            tool_results: Results from executing the tool calls
+            **kwargs: Additional parameters to pass to the API
+        
+        Returns:
+            Tuple[str, Optional[List[ToolCall]]]: The model's response and any new tool calls
+        """
+        # Add tool calls and results to the messages
+        updated_messages = messages.copy()
+        
+        # Add the assistant's message with tool calls
+        tool_call_message = Message(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                {
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.get("name", ""),
+                        "arguments": tc.function.get("arguments", "{}")
+                    }
+                }
+                for tc in tool_calls
+            ]
+        )
+        updated_messages.append(tool_call_message)
+        
+        # Add tool results as tool response messages
+        for i, result in enumerate(tool_results):
+            if i < len(tool_calls):
+                tool_result_message = Message(
+                    role="tool",
+                    content=result.result,  # Access result directly
+                    tool_call_id=tool_calls[i].id)
+                updated_messages.append(tool_result_message)
+        
+        # Get the next response from the model
+        return self.create_chat_completion(updated_messages, **kwargs)
+    
+    def create_embeddings(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """
+        Create embeddings for the given texts.
+        
+        Args:
+            texts: List of text strings to embed
+            **kwargs: Additional parameters to pass to the API
+        
+        Returns:
+            List[List[float]]: List of embedding vectors
+        """
+        if self.use_sdk():
+            return self._create_embeddings_sdk(texts, **kwargs)
+        else:
+            return self._create_embeddings_openai(texts, **kwargs)
+    
+    def _create_embeddings_sdk(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """
+        Create embeddings using the native lmstudio-python SDK.
+        
+        Args:
+            texts: List of text strings to embed
+            **kwargs: Additional parameters to pass to the SDK
+        
+        Returns:
+            List[List[float]]: List of embedding vectors
+        """
+        try:
+            embeddings = []
+            for text in texts:
+                try:
+                    # Try the remote_call approach first
+                    response = self._lmstudio_client.llm.remote_call(
+                        method="embed",
+                        kwargs={"text": text, **kwargs})
+
+                    if isinstance(response, dict) and "embedding" in response:
+                        embedding = response["embedding"]
+                    else:
+                        embedding = response
+                        
+                except AttributeError:
+                    # Fallback to direct embed method if available
+                    embedding = self._lmstudio_client.llm.embed(text, **kwargs)
+                    
+                if embedding is None:
+                    # Return empty array for None responses
+                    embedding = []
+                    
+                embeddings.append(embedding)
+                
+            return embeddings
+            
+        except Exception as e:
+            logger.error(f"Error in LM Studio SDK embeddings: {e}")
+            # Fallback to OpenAI API
+            logger.info("Falling back to OpenAI-compatible API for embeddings")
+            return self._create_embeddings_openai(texts, **kwargs)
+    
+    def _create_embeddings_openai(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """
+        Create embeddings using the OpenAI-compatible API.
+        
+        Args:
+            texts: List of text strings to embed
+            **kwargs: Additional parameters to pass to the API
+        
+        Returns:
+            List[List[float]]: List of embedding vectors
+        """
+        try:
+            response = self._openai_client.embeddings.create(
+                model=kwargs.get("model", self.model) or "text-embedding-ada-002",
+                input=texts
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            logger.error(f"Error in OpenAI-compatible embeddings: {e}")
+            # Return empty embeddings instead of raising
+            return [[] for _ in texts]

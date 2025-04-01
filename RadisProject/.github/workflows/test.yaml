@@ -1,0 +1,84 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for benchmark comparison
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+          pip install pytest pytest-cov pytest-benchmark
+
+      - name: Download previous benchmark data
+        uses: actions/download-artifact@v3
+        with:
+          name: benchmark-data
+          path: .benchmarks/
+        continue-on-error: true
+
+      - name: Run tests with coverage and benchmarks
+        run: |
+          pytest \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term \
+            --benchmark-only \
+            --benchmark-autosave \
+            --benchmark-compare \
+            tests/
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Save benchmark data
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-data
+          path: .benchmarks/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Process benchmark comparison
+        if: github.event_name == 'pull_request'
+        run: |
+          # Generate benchmark comparison report
+          pytest-benchmark compare --group-by=func \
+            .benchmarks/Linux-benchmark-main.json \
+            .benchmarks/Linux-benchmark-PR.json > benchmark_report.txt
+
+      - name: Comment PR with benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('benchmark_report.txt', 'utf8');
+            const comment = `### Performance Benchmark Results\n\`\`\`\n${report}\n\`\`\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            })
+

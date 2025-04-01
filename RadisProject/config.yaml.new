@@ -1,0 +1,166 @@
+# RadisProject Configuration
+version: "1.0.0"
+
+# LLM Configuration
+llm:
+  model: "gemma-3-4b-it"  # Default model
+  api_base: "http://127.0.0.1:1234/"
+  api_key: "lm-studio"  # Default for LM Studio
+  max_tokens: 25317
+  temperature: 0.1
+  timeout: 120.0
+  retry_attempts: 3
+  streaming: true
+  
+  # Vision-specific settings
+  vision:
+    model: "gemma-3-4b-it"
+    api_base: "http://127.0.0.1:1234/"
+    api_key: "lm-studio"
+    max_tokens: 20033
+    detail_level: "high"
+  
+  # Alternative providers
+# Providers Configuration
+providers:
+
+  openai:
+    enabled: false
+    model: "gpt-4-turbo"
+    api_base: "https://api.openai.com/v1"
+    max_tokens: 4096
+    temperature: 0.0
+  
+  anthropic:
+    enabled: false
+    model: "claude-3-opus-20240229"
+    api_base: "https://api.anthropic.com"
+    max_tokens: 4096
+    temperature: 0.0
+  
+  azure:
+    enabled: false
+    model: "gpt-4"
+    endpoint: "https://your-endpoint.openai.azure.com/"
+    api_version: "2023-05-15"
+    deployment_id: "your-deployment-id"
+    max_tokens: 4096
+    temperature: 0.0
+
+n
+# Display Settings
+display:
+  colors: true
+  verbose: true
+  progress_bar: true
+  timestamps: true
+  log_level: "INFO"
+
+# Browser Configuration
+browser:
+  headless: true
+  executable_path: "/usr/bin/firefox"
+  disable_security: false
+  timeout: 30
+  max_instances: 3
+  args: ["--headless", "--disable-gpu"]
+
+# Tool Configuration
+tools:
+  allow_terminal: true
+  allow_python_exec: true
+  allow_file_access: true
+  show_hidden_files: false
+  sudo_allowed: false  # Restricted for security
+  max_file_size: 10485760  # 10MB
+  restricted_paths: ["/etc", "/var"]
+  allowed_python_modules: ["os", "sys", "re", "json", "requests", "numpy", "pandas"]
+
+# Agent Configuration
+agent:
+  max_steps: 200
+  memory_limit: 64
+  tool_choice: "auto"
+  system_prompt: "You are a helpful AI assistant with access to various tools."
+  timeout: 300
+  verbose_logging: true
+  keep_history: true
+
+# API Configuration
+api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+  require_auth: false
+  rate_limit: 100
+  cors_origins: ["http://localhost:3000"]
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  file: "logs/radis.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  console: true
+
+# MCP Settings
+mcp:
+  enabled: true
+  server_url: "http://localhost:5004"
+  install_dir: "./mcp_apps"
+  auto_update: true
+  verify_signatures: true
+
+# Speech Settings
+speech:
+  enabled: true
+  stt_model: "tiny.en"
+  stt_engine: "whisper"
+  tts_model: "tts-1"
+  tts_voice: "alloy"
+  auto_transcribe: false
+  language: "en"
+  sample_rate: 16000
+  silence_threshold: 0.1
+  silence_duration: 1.0
+
+# Web Search Configuration
+web_search:
+  enabled: true
+  default_engine: "google"
+  engines: ["google", "bing", "duckduckgo", "brave"]
+  cache_results: true
+  cache_ttl: 300
+  max_results: 10
+  timeout: 30
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+# Development Mode
+debug: true
+development: true
+
+# System Settings
+system:
+  working_dir: "workspace"
+  temp_dir: "temp"
+  cache_dir: "cache"
+  max_memory: "4GB"
+  cleanup_interval: "1h"
+
+# GPU Settings
+gpu_settings:
+  rocm:
+    enabled: true
+    devices: [0, 1]  # Explicitly use 7900 XTX (0) and 7800 XT (1)
+    exclude_devices: [2]  # Exclude iGPU
+    memory_allocation:
+      device_0: 0.9  # 90% memory allocation for 7900 XTX
+      device_1: 0.9  # 90% memory allocation for 7800 XT
+    compute_priority:
+      device_0: 1  # Higher priority for 7900 XTX
+      device_1: 2  # Lower priority for 7800 XT
+    power_limit:
+      device_0: 230  # Power limit in watts for 7900 XTX
+      device_1: 330  # Power limit in watts for 7800 XT

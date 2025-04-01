@@ -1,0 +1,102 @@
+{
+  "/": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /)\"}"
+    }
+  },
+  "/v1/completions": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /v1/completions)\"}"
+    },
+    "POST": {
+      "status": "error",
+      "error": "HTTPConnectionPool(host='127.0.0.1', port=1234): Read timed out. (read timeout=5)"
+    }
+  },
+  "/v1/chat/completions": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /v1/chat/completions)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\n  \"id\": \"chatcmpl-uztaec5ig9b8hggkfcmaki\",\n  \"object\": \"chat.completion\",\n  \"created\": 1743364013,\n  \"model\": \"qwen2.5-7b-instruct-1m\",\n  \"draft_model\": \"qwq-0.5b-distilled-sft\",\n  \"choices\": [\n    "
+    }
+  },
+  "/chat/completions": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /chat/completions)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /chat/completions)\"}"
+    }
+  },
+  "/models": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /models)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /models)\"}"
+    }
+  },
+  "/completion": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /completion)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /completion)\"}"
+    }
+  },
+  "/generate": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /generate)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /generate)\"}"
+    }
+  },
+  "/api": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /api)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /api)\"}"
+    }
+  },
+  "/api/generate": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /api/generate)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /api/generate)\"}"
+    }
+  },
+  "/v1/engines/default/completions": {
+    "GET": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (GET /v1/engines/default/completions)\"}"
+    },
+    "POST": {
+      "status": 200,
+      "response": "{\"error\":\"Unexpected endpoint or method. (POST /v1/engines/default/completions)\"}"
+    }
+  }
+}

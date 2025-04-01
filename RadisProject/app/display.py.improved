@@ -1,0 +1,340 @@
+from typing import Optional, Any, List, ContextManager
+import sys
+from enum import Enum
+from dataclasses import dataclass
+import colorama
+from colorama import Fore, Back, Style
+from rich.console import Console
+from rich.panel import Panel
+from contextlib import contextmanager
+from types import TracebackType
+from typing import Type
+
+# Initialize colorama for cross-platform color support
+colorama.init()
+
+class DisplayLevel(Enum):
+    DEBUG = 1
+    INFO = 2
+    WARNING = 3
+    ERROR = 4
+
+@dataclass
+class DisplayConfig:
+    """Configuration for display components."""
+    show_timestamps: bool = True
+    color_output: bool = True
+    debug_mode: bool = False
+    progress_bar_width: int = 50
+
+class ToolDisplay:
+    """Handles the display of tools and their outputs"""
+
+    def __init__(self, config: Optional[DisplayConfig] = None):
+        """Initialize ToolDisplay with optional configuration"""
+        self.config = config or DisplayConfig()
+        self.console = Console()
+
+    def show_tools(self, tools: List[Any]):
+        pass
+
+    def tool_start(self, tool_name: str, description: str) -> None:
+        """Display tool operation start."""
+        print(f"{Fore.CYAN}[TOOL]{Style.RESET_ALL} Starting {Fore.GREEN}{tool_name}{Style.RESET_ALL}: {description}")
+
+    def tool_complete(self, tool_name: str, result: Any) -> None:
+        """Display tool operation completion."""
+        print(f"{Fore.CYAN}[TOOL]{Style.RESET_ALL} Completed {Fore.GREEN}{tool_name}{Style.RESET_ALL}")
+        if self.config.debug_mode:
+            print(f"{Fore.BLUE}Result:{Style.RESET_ALL} {result}")
+
+    def tool_error(self, tool_name: str, error: Exception) -> None:
+        """Display tool operation error."""
+        print(f"{Fore.RED}[ERROR]{Style.RESET_ALL} In {tool_name}: {error}", file=sys.stderr)
+
+class ArtifactDisplay:
+    """Handles the display of different types of artifacts."""
+
+    def __init__(self, config: Optional[DisplayConfig] = None):
+        self.config = config or DisplayConfig()
+
+    def show_code(self, code: str, language: str = "python") -> None:
+        """Display code artifacts with syntax highlighting."""
+        print(f"{Fore.YELLOW}```{language}{Style.RESET_ALL}")
+        print(code)
+        print(f"{Fore.YELLOW}```{Style.RESET_ALL}")
+
+    def show_file_diff(self, file_path: str, diff: str) -> None:
+        """Display file differences."""
+        print(f"{Fore.CYAN}File: {file_path}{Style.RESET_ALL}")
+        for line in diff.split('\n'):
+            if line.startswith('+'):
+                print(f"{Fore.GREEN}{line}{Style.RESET_ALL}")
+            elif line.startswith('-'):
+                print(f"{Fore.RED}{line}{Style.RESET_ALL}")
+            else:
+                print(line)
+
+    def show_data(self, data: Any, title: Optional[str] = None) -> None:
+        """Display data artifacts."""
+        if title:
+            print(f"{Fore.CYAN}{title}:{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}{data}{Style.RESET_ALL}")
+
+class ProgressDisplayError(Exception):
+    """Custom exception for ProgressDisplay errors."""
+    pass
+
+class ProgressDisplay:
+    """Handles the display of progress indicators.
+    
+    This class provides methods for tracking and displaying progress of operations.
+    It includes robust error handling to ensure proper usage and feedback.
+    
+    Attributes:
+        config (DisplayConfig): Display configuration settings
+        _current (int): Current progress value
+        _total (int): Total progress value (target)
+        _message (str): Message to display with the progress bar
+        _active (bool): Whether the progress tracking is active
+    """
+
+    def __init__(self, config: Optional[DisplayConfig] = None):
+        """Initialize a new ProgressDisplay instance.
+        
+        Args:
+            config (Optional[DisplayConfig]): Display configuration settings.
+              If not provided, default settings will be used.
+        """
+        self.config = config or DisplayConfig()
+        self._current = 0
+        self._total = 0
+        self._message = ""
+        self._active = False
+
+    def start(self, total: int, message: str) -> None:
+        """Initialize progress tracking with validation.
+        
+        Args:
+            total (int): Total number of steps for the operation.
+            message (str): Message to display with the progress bar.
+            
+        Raises:
+            ProgressDisplayError: If total is less than 0 or message is empty.
+            
+        Note:
+            If total is 0, the progress bar will be initialized but no visual 
+            progress will be shown until total is set to a positive value.
+        """
+        # Validate inputs
+        if total < 0:
+            raise ProgressDisplayError("Total progress steps cannot be negative")
+        if not message:
+            raise ProgressDisplayError("Progress message cannot be empty")
+        
+        self._current = 0
+        self._total = total
+        self._message = message
+        self._active = True
+        self._update_progress()
+
+    def advance(self, amount: int = 1) -> None:
+        """Advance progress by the specified amount with validation.
+        
+        Args:
+            amount (int): Amount to advance the progress. Default is 1.
+            
+        Raises:
+            ProgressDisplayError: If progress tracking is not active or if amount is negative.
+        """
+        if not self._active:
+            raise ProgressDisplayError("Cannot advance progress before calling start()")
+        
+        if amount < 0:
+            raise ProgressDisplayError("Cannot advance progress by a negative amount")
+        
+        # Ensure we don't exceed total
+        self._current = min(self._current + amount, self._total)
+        self._update_progress()
+
+    def complete(self) -> None:
+        """Mark progress as complete with validation.
+        
+        Raises:
+            ProgressDisplayError: If progress tracking is not active.
+        """
+        if not self._active:
+            raise ProgressDisplayError("Cannot complete progress before calling start()")
+        
+        self._current = self._total
+        self._update_progress()
+        self._active = False
+        print()  # New line after completion
+
+    def reset(self) -> None:
+        """Reset the progress tracking.
+        
+        This will clear the current progress state without displaying
+        any updates. Useful when cancelling an operation.
+        """
+        self._current = 0
+        self._total = 0
+        self._message = ""
+        self._active = False
+
+    def _update_progress(self) -> None:
+        """Update the progress display with error handling.
+        
+        This internal method handles the actual display update with
+        proper error handling for edge cases.
+        """
+        # Handle edge case where total is 0
+        if self._total == 0:
+            # Just show the message without a progress bar
+            print(f"\r{self._message}", end='', flush=True)
+            return
+
+        try:
+            percentage = (self._current / self._total) * 100
+            bar_width = self.config.progress_bar_width
+            filled_width = int(bar_width * self._current / self._total)
+            
+            # Ensure filled_width is valid
+            filled_width = max(0, min(filled_width, bar_width))
+            
+            bar = '=' * filled_width + '-' * (bar_width - filled_width)
+            print(f"\r{self._message}: [{bar}] {percentage:.1f}%", end='', flush=True)
+        except ZeroDivisionError:
+            # This should not happen due to our check above, but as a fallback
+            print(f"\r{self._message}: [{'?' * self.config.progress_bar_width}] --.--%", end='', flush=True)
+        except Exception as e:
+            # Catch any other unexpected errors and display a fallback
+            print(f"\r{self._message}: Error displaying progress: {str(e)}", end='', flush=True)
+
+    @contextmanager
+    def progress_tracking(self, total: int, message: str) -> ContextManager[None]:
+        """Context manager for automatic progress tracking.
+        
+        This method allows for using the ProgressDisplay in a with statement,
+        automatically handling start and completion.
+        
+        Args:
+            total (int): Total number of steps for the operation.
+            message (str): Message to display with the progress bar.
+            
+        Yields:
+            None
+            
+        Example:
+            ```python
+            progress = ProgressDisplay()
+            with progress.progress_tracking(10, "Processing files"):
+                for i in range(10):
+                    # do work
+                    progress.advance()
+            ```
+        """
+        try:
+            self.start(total, message)
+            yield
+        except Exception as e:
+            # Print error information but still ensure we complete the progress
+            print(f"\n{Fore.RED}Error during progress tracking: {str(e)}{Style.RESET_ALL}", file=sys.stderr)
+            raise
+        finally:
+            # Ensure progress is completed even if an exception occurs
+            if self._active:
+                self.complete()
+
+    def __enter__(self) -> 'ProgressDisplay':
+        """Enter method for using ProgressDisplay as a context manager.
+        
+        Returns:
+            ProgressDisplay: Returns self for use in context manager.
+            
+        Note:
+            This requires calling start() separately before or inside the with block.
+        """
+        return self
+        
+    def __exit__(self, exc_type: Optional[Type[BaseException]], 
+                 exc_val: Optional[BaseException], 
+                 exc_tb: Optional[TracebackType]) -> None:
+        """Exit method for using ProgressDisplay as a context manager.
+        
+        Args:
+            exc_type: Exception type if an exception was raised, otherwise None
+            exc_val: Exception value if an exception was raised, otherwise None
+            exc_tb: Exception traceback if an exception was raised, otherwise None
+            
+        Note:
+            This will call complete() if progress is active.
+        """
+        if self._active:
+            self.complete()
+
+def print_ascii_banner_with_stars(banner_text: str = "AgentRadis") -> None:
+    """Print an ASCII art banner surrounded by stars."""
+    banner_width = len(banner_text) + 4
+    stars_line = "*" * (banner_width + 4)
+
+    print(f"{Fore.YELLOW}{stars_line}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}*{Style.RESET_ALL} ", end="")
+    print(f"{Fore.CYAN}{' ' + banner_text + ' '}{Style.RESET_ALL}", end="")
+    print(f" {Fore.YELLOW}*{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'*' * (len(banner_text) + 8)}{Style.RESET_ALL}")
+
+def setup_display(debug: bool = False, color: bool = True, timestamps: bool = True) -> tuple[ToolDisplay, ArtifactDisplay]:
+    """Initialize and configure all display components."""
+    config = DisplayConfig(debug_mode=debug, color_output=color, show_timestamps=timestamps)
+    tool_display = ToolDisplay(config)
+    artifact_display = ArtifactDisplay(config)
+    return (tool_display, artifact_display)
+
+class InfoDisplay:
+    def __init__(self, config: Optional[DisplayConfig] = None):
+        self.config = config or DisplayConfig()
+        self.console = Console()
+
+    def info(self, message: str):
+        """Display an informational message with appropriate formatting"""
+        color = "blue" if self.config.color_output else "white"
+        panel = Panel(
+            message,
+            title="ℹ️ Info",
+            border_style=color,
+            padding=(1, 2)
+        )
+        self.console.print(panel)
+        # Add separator after info message
+        self.console.print("=" * self.console.width, style="dim")
+        
+    def success(self, message: str):
+        """Display a success message with appropriate formatting"""
+        color = "green" if self.config.color_output else "white"
+        panel = Panel(
+            message,
+            title="✅ Success",
+            border_style=color,
+            padding=(1, 2)
+        )
+        self.console.print(panel)
+        # Add separator after success message
+        self.console.print("=" * self.console.width, style="dim")
+
+    def error(self, message: str):
+        """Display an error message with appropriate formatting"""
+        color = "red" if self.config.color_output else "white"
+        panel = Panel(
+            message,
+            title="❌ Error",
+            border_style=color,
+            padding=(1, 2)
+        )
+        self.console.print(panel)
+        # Add separator after error message
+        self.console.print("=" * self.console.width, style="dim")
+
+    def clear(self):
+        """Clear the console display"""
+        self.console.clear()

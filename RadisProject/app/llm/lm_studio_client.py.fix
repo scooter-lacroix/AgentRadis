@@ -1,0 +1,91 @@
+# Insert code from lines 1-96 here
+import logging
+import os
+from typing import Dict, Any, List, Optional, Union
+
+from openai import OpenAI
+from openai.types.chat import ChatCompletion
+
+# Try to import lmstudio SDK
+try:
+    import lmstudio
+    LMSTUDIO_SDK_AVAILABLE = True
+except ImportError:
+    LMSTUDIO_SDK_AVAILABLE = False
+
+from app.schema.lmstudio_params import GenerateParams
+from app.llm.llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
+
+class LMStudioClient(LLMClient):
+    """Client for interacting with LM Studio local models.
+    
+    This client provides a unified interface to interact with LM Studio,
+    with fallback to OpenAI-compatible API when needed.
+    """
+    
+    def __init__(
+        self,
+        api_key: str = "",
+        api_base: str = "http://localhost:1234/v1",
+        model: str = "",
+        timeout: int = 300
+    ):
+        """Initialize the LM Studio client.
+        
+        Args:
+            api_key: API key (not required for local LM Studio, but kept for compatibility)
+            api_base: Base URL for the API (e.g., http://localhost:1234/v1)
+            model: Model name to use
+            timeout: Request timeout in seconds
+        """
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.api_base = api_base
+        self.model = model
+        self.timeout = timeout
+        
+        self._openai_client = None
+        self._lmstudio_client = None
+        
+        self._initialize_clients()
+    
+    def _initialize_clients(self):
+        """Initialize API clients based on configuration and SDK availability."""
+        # Always initialize OpenAI client as fallback
+        self._openai_client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            timeout=self.timeout
+        )
+        # Initialize lmstudio client if SDK is available
+        if LMSTUDIO_SDK_AVAILABLE:
+            try:
+                # Process API base URL for WebSocket connections
+                api_host = self.api_base.rstrip('/')  # Remove trailing '/'
+                
+                # FIXED: Don't add protocol prefixes as the SDK already handles this
+                # Extract the host portion without protocol prefixes and endpoint suffixes
+                if api_host.startswith('http://'):
+                    api_host = api_host.replace('http://', '')
+                elif api_host.startswith('https://'):
+                    api_host = api_host.replace('https://', '')
+                    
+                # Remove any path components like /v1
+                if '/' in api_host:
+                    api_host = api_host.split('/')[0]
+
+                try:
+                    self._lmstudio_client = lmstudio.Client(api_host=api_host)
+                    logger.info(f"Initialized LM Studio client with host: {api_host}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize LM Studio client: {e}")
+                    self._lmstudio_client = None
+
+                # Load the specified model
+                if self.model:
+                    try:
+                        # FIX: Use llm.connect(model) instead of load_model
+                        self._lmstudio_client.llm.connect(self.model)
+                        logger.info(f"Connected to LM Studio model: {self.model}")
+# Insert remaining code from lines 118 onwards

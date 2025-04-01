@@ -1,0 +1,450 @@
+import os
+import signal
+import asyncio
+import logging
+import warnings
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Tuple, Dict, Any, Callable, Union
+from contextlib import contextmanager
+from functools import wraps
+
+from .base import BaseAgent
+from ..tool.base import BaseTool
+from .response_processor import ResponseProcessor
+from .identity_context import RadisIdentityContext, CommandHistory
+from .security_config import SecurityConfig
+from .errors import ToolNotFoundError, ToolExecutionError, SecurityError
+from .metrics import ToolMetrics, Message, Role
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Suppress specific deprecation warnings
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="your_deprecated_module"
+)
+from .base import BaseAgent
+from .response_processor import ResponseProcessor
+from .identity_context import RadisIdentityContext, CommandHistory
+from .security_config import SecurityConfig
+
+
+@dataclass
+class RadisConfig:
+    """Configuration for EnhancedRadis agent."""
+
+    project_root: Path
+    allowed_paths: List[Path]
+    model_name: str
+    system_prompt: str
+    max_history_items: int = 100
+
+
+class EnhancedRadis(BaseAgent):
+    """
+    Enhanced Radis agent with security boundaries and identity management.
+    Inherits from BaseAgent and adds security features, response processing,
+    and identity context management.
+    """
+    
+    @property
+    def name(self) -> str:
+        """The name of the agent."""
+        return "EnhancedRadis"
+    
+    async def async_setup(self) -> None:
+        """Set up the agent asynchronously."""
+        # Initialize components that require async setup
+        self._is_configured = True
+        # Set up any async resources
+        pass
+
+    def __init__(self, config: RadisConfig, security_config: SecurityConfig):
+        """
+        Initialize EnhancedRadis with configuration and security settings.
+
+        Args:
+            config: RadisConfig instance containing agent configuration
+            security_config: SecurityConfig instance for security settings
+        """
+        # Set up signal handlers
+        self._setup_signal_handlers()
+
+        """
+        Initialize EnhancedRadis with configuration and security settings.
+
+        Args:
+            config: RadisConfig instance containing agent configuration
+            security_config: SecurityConfig instance for security settings
+        """
+        super().__init__(
+            model_name=config.model_name, system_prompt=config.system_prompt
+        )
+
+        self.config = config
+        self.security_config = security_config
+
+        # Initialize components
+        self.response_processor = ResponseProcessor(project_root=config.project_root)
+        self.identity_context = RadisIdentityContext(
+            project_root=config.project_root, allowed_paths=config.allowed_paths
+        )
+
+        # Initialize state
+        self.command_history: List[CommandHistory] = []
+        self._setup_security_boundaries()
+
+    def _setup_signal_handlers(self) -> None:
+        """Set up handlers for system signals."""
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _signal_handler(self, signum: int, frame: Any) -> None:
+        """Handle system signals gracefully."""
+        signal_name = signal.Signals(signum).name
+        logger.info(f"[{self.name}] Received signal {signal_name}")
+
+        # Create task for cleanup
+        asyncio.create_task(self.cleanup())
+        raise SystemExit(f"Terminated by signal {signal_name}")
+
+    @contextmanager
+    def identity_check(self) -> None:
+        """Context manager for ensuring identity compliance."""
+        try:
+            # Set up identity context
+            self.identity_context.push_state()
+            yield
+        finally:
+            # Restore previous state
+            self.identity_context.pop_state()
+
+    def _setup_security_boundaries(self) -> None:
+        """Set up initial security boundaries and validations."""
+        if not self.config.project_root.exists():
+            raise ValueError(f"Project root does not exist: {self.config.project_root}")
+
+        # Validate all allowed paths are within project root
+        for path in self.config.allowed_paths:
+            if not self.identity_context.is_path_allowed(path):
+                raise ValueError(f"Path not allowed: {path}")
+
+        # Set initial working directory
+        self.identity_context.set_working_directory(self.config.project_root)
+
+    def process_command(
+        self, command: str, context: Dict[str, Any]
+    ) -> Tuple[bool, str]:
+        """
+        Process a command with security checks and identity management.
+
+        Args:
+            command: The command to process
+            context: Additional context for command processing
+
+        Returns:
+            Tuple[bool, str]: Success status and response/error message
+        """
+        # Validate command context
+        if not self._validate_command_context(context):
+            return False, "Invalid command context"
+
+        try:
+            # Record command in history
+            self.command_history.append(
+                CommandHistory(
+                    command=command,
+                    context=context,
+                    working_dir=self.identity_context.get_working_directory(),
+                )
+            )
+
+            # Trim history if needed
+            if len(self.command_history) > self.config.max_history_items:
+                self.command_history = self.command_history[
+                    -self.config.max_history_items :
+                ]
+
+            # Process command through base agent
+            success, response = super().process_command(command, context)
+            if not success:
+                return False, response
+
+            # Validate and sanitize response
+            is_valid, error_msg = self.response_processor.validate_response(response)
+            if not is_valid:
+                return False, f"Response validation failed: {error_msg}"
+
+            # Sanitize identity references
+            sanitized_response = self.response_processor.sanitize_identity(response)
+
+            return True, sanitized_response
+
+        except Exception as e:
+            return False, f"Command processing error: {str(e)}"
+
+    def _validate_command_context(self, context: Dict[str, Any]) -> bool:
+        """
+        Validate command context for security compliance.
+
+        Args:
+            context: Command context to validate
+
+        Returns:
+            bool: True if context is valid, False otherwise
+        """
+        if "working_dir" in context:
+            try:
+                path = Path(context["working_dir"])
+                if not self.identity_context.is_path_allowed(path):
+                    return False
+            except Exception:
+                return False
+
+        if "file_paths" in context:
+            try:
+                paths = [Path(p) for p in context["file_paths"]]
+                return all(self.identity_context.is_path_allowed(p) for p in paths)
+            except Exception:
+                return False
+
+        return True
+
+    def cleanup(self) -> None:
+        """Perform cleanup operations."""
+        try:
+            # Clear command history
+            self.command_history.clear()
+
+            # Reset working directory to project root
+            self.identity_context.set_working_directory(self.config.project_root)
+
+            # Call parent cleanup
+            super().cleanup()
+        except Exception as e:
+            raise RuntimeError(f"Cleanup failed: {str(e)}")
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    async def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup."""
+        self.cleanup()
+
+        self._is_configured = True
+        if self.metrics_tracker:
+            await self.metrics_tracker.initialize()
+
+        # Initialize all tools
+        for tool in self.tools:
+            try:
+                await tool.initialize()
+            except Exception as e:
+                logger.error(
+                    f"[{self.name}] Failed to initialize tool {tool.name}: {e}"
+                )
+
+    async def run(self, prompt: str, **kwargs) -> str:
+        """
+        Process the input prompt and handle any required tool executions.
+
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional keyword arguments for processing
+
+        Returns:
+            str: The processed response
+        """
+        try:
+            # Add user message to memory
+            self.memory.add_message(Message(role=Role.USER, content=prompt))
+
+            # Process the prompt and detect if tools need to be used
+            response = await self._process_with_tools(prompt)
+
+            # Add assistant response to memory
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=response))
+
+            return response
+
+        except Exception as e:
+            error_msg = f"[{self.name}] Error processing prompt: {str(e)}"
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=error_msg))
+            raise
+
+    async def step(self) -> bool:
+        """Execute a single step in the agent's processing.
+
+        Returns:
+            True if more steps are needed, False if processing is complete
+        """
+        if not self.memory.messages:
+            return False
+
+        # Get the last message
+        last_message = self.memory.messages[-1]
+
+        # If the last message is from the user, we need to process it
+        if last_message.role == Role.USER:
+            response = await self._process_with_tools(last_message.content)
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=response))
+            return True
+
+        return False
+
+    async def _process_with_tools(self, prompt: str) -> str:
+        """
+        Internal method to process prompt and handle tool executions.
+
+        Args:
+            prompt: The input prompt to process
+
+        Returns:
+            str: The processed response with tool outputs incorporated
+        """
+        # Verify identity context before tool execution
+        if not self.identity_context.verify_identity():
+            raise SecurityError("Identity verification failed")
+
+        for tool in self.tools:
+            if tool.should_run(prompt):
+                start_time = time.time()
+                success = False
+
+                logger.info(f"[{self.name}] Executing tool: {tool.name}")
+                try:
+                    result = await tool.run(prompt=prompt)
+                    success = True
+                    logger.info(
+                        f"[{self.name}] Successfully executed tool: {tool.name}"
+                    )
+
+                    # Sanitize the tool result to maintain identity consistency
+                    sanitized_result = self.response_processor.sanitize_response(
+                        str(result)
+                    )
+
+                    # Record tool execution in memory
+                    self.memory.add_message(
+                        Message(
+                            role=Role.TOOL,
+                            content=sanitized_result,
+                            tool_name=tool.name,
+                        )
+                    )
+
+                    return sanitized_result
+                except ToolExecutionError as e:
+                    # Log tool failure and continue
+                    error_msg = (
+                        f"[{self.name}] Tool {tool.name} execution failed: {str(e)}"
+                    )
+                    logger.error(error_msg)
+                    if self.metrics_tracker:
+                        self.metrics_tracker.record_error(f"{self.name}: {str(e)}")
+                    return f"Tool execution failed: {str(e)}"
+
+                finally:
+                    execution_time = time.time() - start_time
+                    logger.debug(
+                        f"[{self.name}] Tool {tool.name} execution time: {execution_time:.4f}s"
+                    )
+                    self.tool_metrics[tool.name].record_execution(
+                        success=success, execution_time=execution_time
+                    )
+
+        # If no tools were executed, call LLM for a response
+        # If no tools were executed, call LLM for a response
+        logger.info(f"[{self.name}] No tools matched, calling LLM for response")
+        try:
+            # Get the conversation history for context
+            messages = self.memory.get_messages()
+            # Call LLM with proper parameters
+            content, _ = self.llm.complete(
+                messages=messages, model=self.model, temperature=self.temperature
+            )
+
+            # Apply identity sanitization to the LLM response
+            sanitized_content = self.response_processor.sanitize_response(content)
+            logger.debug(f"[{self.name}] Original response: {content}")
+            logger.debug(f"[{self.name}] Sanitized response: {sanitized_content}")
+
+            return sanitized_content
+        except Exception as e:
+            error_msg = f"[{self.name}] Error calling LLM: {str(e)}"
+            logger.error(error_msg)
+            if self.metrics_tracker:
+                self.metrics_tracker.record_error(f"{self.name}: {error_msg}")
+            return f"Failed to process query: {str(e)}"
+
+    async def reset(self) -> None:
+        """
+        Reset the agent's state, including memory and metrics.
+        """
+        # Clear memory while preserving system prompt
+        system_prompt = None
+        for msg in self.memory.messages:
+            if msg.role == Role.SYSTEM:
+                system_prompt = msg.content
+                break
+
+        self.memory.clear()
+
+        if system_prompt:
+            self.memory.add_message(Message(role=Role.SYSTEM, content=system_prompt))
+
+        # Reset tool metrics
+        for tool_name in self.tool_metrics:
+            self.tool_metrics[tool_name] = ToolMetrics()
+
+        # Reset tools
+        for tool in self.tools:
+            asyncio.create_task(tool.cleanup())
+
+    async def cleanup(self) -> None:
+        """Cleanup resources used by the agent."""
+        try:
+            # Clear memory
+            if self.memory:
+                self.memory.clear()
+
+            # Cleanup identity context
+            self.identity_context.cleanup()
+
+            # Reset working directory
+            if self.config.project_root.exists():
+                os.chdir(str(self.config.project_root))
+
+            # Cleanup tools
+            cleanup_tasks = [asyncio.create_task(tool.cleanup()) for tool in self.tools]
+            # Wait for all cleanup tasks to complete
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+            # Clear command history
+            self.command_history.clear()
+
+            logger.info(f"[{self.name}] Cleanup completed successfully")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Error during cleanup: {str(e)}")
+            raise RuntimeError(f"Cleanup failed: {str(e)}")
+
+    def get_tool_metrics(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get metrics for all tools.
+
+        Returns:
+            Dict containing metrics for each tool
+        """
+        return {
+            name: {
+                "agent_name": self.name,
+                "total_calls": metrics.total_calls,
+                "successful_calls": metrics.successful_calls,
+                "failed_calls": metrics.failed_calls,
+                "total_execution_time": metrics.total_execution_time,
+                "

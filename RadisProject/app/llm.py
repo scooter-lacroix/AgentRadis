@@ -11,7 +11,6 @@ from pathlib import Path
 import tiktoken
 import openai
 from openai import OpenAI
-from fixed_lm_studio_client import LMStudioClient
 import numpy as np
 from ctransformers import AutoModelForCausalLM, AutoConfig # Import ctransformers
 
@@ -370,35 +369,6 @@ class LMStudioLLM(BaseLLM):
     is_local_file = False
     """LM Studio implementation of the LLM interface."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        super().__init__(config)
-        self.config = config or {}
-        
-        # Initialize required attributes
-        self.model_name = self.config.get("model", "gemma-3-4b-it")
-        self.api_base = self.config.get("api_base", "http://127.0.0.1:1234/")
-        self.api_key = self.config.get("api_key", "lm-studio")  # Default API key
-        self.timeout = self.config.get("timeout", 120)
-        self.model_path = self.config.get("model_path", None)
-        self.gpu_layers = self.config.get("gpu_layers", 1)
-        self.context_length = self.config.get("context_length", 2048)
-        
-        # Initialize attributes needed for either local file or API
-        self.loaded_model = None
-        self.tokenizer = None
-        self.client = None
-        self.lm_studio_client = None
-        self.is_local_file = False
-        
-        # Initialize based on available configuration
-        if self.model_path:
-            self._init_local_model()
-        elif self.api_base: # Ensure api_base is present for API client init
-             self._init_api_client()
-        else:
-             # If neither model_path nor api_base is provided, raise error early
-             raise ValueError("LMStudioLLM requires either 'model_path' or 'api_base' to be configured.")
-
 
     def _init_local_model(self):
         """Initialize a local model using ctransformers."""
@@ -457,52 +427,29 @@ class LMStudioLLM(BaseLLM):
 
     def _init_api_client(self):
         """Initialize an API client for LM Studio."""
-        if not self.api_base: # Double check api_base
-             raise ValueError("Cannot initialize API client without 'api_base' configured.")
-             
         logger.info(f"Initializing LM Studio client for API base: {self.api_base}")
         try:
-            # Create standard OpenAI-compatible client as fallback
+            # Create OpenAI-compatible client
             self.client = OpenAI(
                 base_url=self.api_base,
                 api_key=self.api_key,
                 timeout=self.timeout
             )
-            
-            # Create our robust fixed LMStudioClient
-            logger.info("Initializing improved LMStudioClient with multiple endpoint support")
-            client_config = {
-                "api_type": "local",
-                "model": self.model_name,
-                "api_base": self.api_base,
-                "api_key": self.api_key,
-                "timeout": self.timeout
-            }
-            self.lm_studio_client = LMStudioClient(client_config)
+            # is_local_file already initialized as a class attribute
             
             # Test connection to API
             logger.debug("Testing connection to LM Studio API...")
             try:
-                # First try with standard client
                 response = self.client.models.list()
-                logger.info(f"Successfully connected to LM Studio API using standard client. Available models: {response}")
+                logger.info(f"Successfully connected to LM Studio API. Available models: {response}")
             except Exception as e:
-                logger.warning(f"Could not list models from LM Studio API using standard client: {e}")
-                # Try with fixed client's model list function
-                try:
-                    models = self.lm_studio_client.get_model_list() if hasattr(self.lm_studio_client, 'get_model_list') else []
-                    if models:
-                        logger.info(f"Successfully connected to LM Studio API using fixed client. Available models: {models}")
-                    else:
-                        logger.warning("Could not retrieve model list using fixed client. Continuing anyway.")
-                except Exception as e2:
-                    logger.warning(f"Could not list models using fixed client: {e2}. Continuing anyway.")
+                logger.warning(f"Could not list models from LM Studio API: {e}. Continuing anyway.")
         except Exception as e:
-            logger.error(f"Failed to initialize LM Studio API clients: {e}", exc_info=True)
+            logger.error(f"Failed to initialize LM Studio API client: {e}", exc_info=True)
             if "Connection refused" in str(e):
                 raise ConnectionError(f"Could not connect to LM Studio API at {self.api_base}. "
                                      "Is the LM Studio server running?") from e
-            raise RuntimeError(f"Failed to initialize LM Studio API clients: {e}") from e
+            raise RuntimeError(f"Failed to initialize LM Studio API client: {e}") from e
 
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate text based on a prompt using LM Studio."""
@@ -517,8 +464,8 @@ class LMStudioLLM(BaseLLM):
         temperature = kwargs.get("temperature", 0.7)
         max_tokens = kwargs.get("max_tokens", 1000)
 
-        # Check for local model first
         if self.is_local_file and self.loaded_model:
+            # Use ctransformers model
             try:
                 # Basic chat templating (adapt as needed for specific models)
                 prompt_string = ""
@@ -558,98 +505,39 @@ class LMStudioLLM(BaseLLM):
                 logger.error(f"Error during local model generation: {e}", exc_info=True)
                 raise RuntimeError(f"Local model generation failed: {e}") from e
 
-        # If no local model, try API clients
-        elif self.lm_studio_client or self.client:
+        elif self.client:
+            # Use OpenAI client pointed at local API (existing logic)
             try:
-                # First try with our improved fixed LMStudioClient
-                if not self.lm_studio_client:
-                     raise Exception("Fixed LMStudioClient not initialized, attempting fallback.") # Skip if not initialized
-
-                logger.info(f"Generating completion using fixed LMStudioClient with multi-endpoint support")
-                content, tool_calls = self.lm_studio_client.create_chat_completion(
+                response = self.client.chat.completions.create(
+                    model=self.model_name, # Use model name configured
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    model=self.model_name
                 )
 
-                # Check if the response indicates an error OR is empty
-                if content is None or content == "" or (isinstance(content, str) and content.startswith("Error:")):
-                    logger.warning(f"LMStudioClient returned an error or empty content: {content}")
-                    # Raise exception to trigger fallback
-                    raise Exception(f"Fixed client error or empty response: {content}")
+                content = response.choices[0].message.content
 
-                # Handle successful response from fixed client
-                logger.info("Successfully generated response using fixed LMStudioClient")
+                # Metadata for local API models might be limited
                 metadata = {
                     "model": self.model_name,
-                    "usage": { "prompt_tokens": -1, "completion_tokens": -1, "total_tokens": -1 }
+                    "usage": {
+                 # Attempt to get usage if API provides it, else -1
+                         "prompt_tokens": getattr(response.usage, 'prompt_tokens', -1),
+                         "completion_tokens": getattr(response.usage, 'completion_tokens', -1),
+                         "total_tokens": getattr(response.usage, 'total_tokens', -1),
+                                }
                 }
-                return content, metadata
+                return content, metadata # Return inside the try block
 
-            except Exception as fixed_client_error:
-                # Log the error from the fixed client attempt and fall back
-                logger.warning(f"Fixed LMStudioClient failed: {fixed_client_error}. Falling back to standard client.")
-
-                # Fall back to standard OpenAI client if available
-                if self.client:
-                    try:
-                        logger.info("Falling back to standard OpenAI client")
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=messages,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                        )
-
-                        # Add null/empty checking here for the standard client response
-                        if response is None:
-                            logger.error("Received None response from LM Studio API (standard client)")
-                            return "Error: No response from LM Studio API", {"model": self.model_name, "error": "null_response"}
-
-                        if not hasattr(response, 'choices') or response.choices is None or len(response.choices) == 0:
-                            logger.error(f"Invalid response format from LM Studio API (standard client): {response}")
-                            return "Error: Invalid response format from LM Studio API", {"model": self.model_name, "error": "invalid_response_format"}
-
-                        if not hasattr(response.choices[0], 'message') or response.choices[0].message is None:
-                            logger.error(f"No message in response from LM Studio API (standard client): {response.choices[0]}")
-                            return "Error: No message in response from LM Studio API", {"model": self.model_name, "error": "no_message"}
-
-                        content = response.choices[0].message.content
-
-                        # Check for empty content from standard client as well
-                        if not content:
-                             logger.error("Received empty content from standard LM Studio API client.")
-                             return "Error: Empty content from LM Studio API", {"model": self.model_name, "error": "empty_content"}
-
-                        # Metadata for standard API client
-                        metadata = {
-                            "model": self.model_name,
-                            "usage": {
-                                "prompt_tokens": getattr(response.usage, 'prompt_tokens', -1),
-                                "completion_tokens": getattr(response.usage, 'completion_tokens', -1),
-                                "total_tokens": getattr(response.usage, 'total_tokens', -1),
-                            }
-                        }
-                        return content, metadata
-
-                    except Exception as e:
-                        # This catches errors specifically from the standard client fallback attempt
-                        logger.error(f"Error in LM Studio API completion (standard client fallback failed): {e}", exc_info=True)
-                        # Check for connection errors specifically
-                        if "Connection refused" in str(e) or "Failed to connect" in str(e):
-                            raise ConnectionError(f"Could not connect to LM Studio API at {self.api_base}. Is it running?") from e
-                        raise # Re-raise other errors from standard client
-                else:
-                    # If fixed client failed and standard client wasn't even initialized
-                    logger.error("Fixed LMStudioClient failed, and no standard client available for fallback.")
-                    raise fixed_client_error # Re-raise the original error from the fixed client
-
-        # Neither local model nor API clients were initialized successfully in __init__
-        else:
-            logger.error("LMStudioLLM complete called but neither local model nor API clients are initialized.")
+            except Exception as e: # Indented to align with try at 435
+                logger.error(f"Error in LM Studio API completion: {e}", exc_info=True)
+                # Check for connection errors specifically
+                if "Connection refused" in str(e) or "Failed to connect" in str(e):
+                    raise ConnectionError(f"Could not connect to LM Studio API at {self.api_base}. Is it running?") from e
+                raise # Re-raise other errors
+        else: # This else corresponds to the main if/elif structure
+            # This state should not be reached if __init__ validation is correct
             raise RuntimeError("LMStudioLLM is not properly initialized. No model path or API base configured.")
-
 
     def embed(self, text: Union[str, List[str]], **kwargs) -> np.ndarray:
         """Generate embeddings for the given text."""
@@ -667,7 +555,7 @@ class LMStudioLLM(BaseLLM):
                 # Fallback to tiktoken if local tokenizer fails or raises an error
                 # Use the actual model name if available for better accuracy with tiktoken
                 model_for_tiktoken = self.model_name if self.model_name != "local-model" else "gemma-3-4b-it" # Fallback model
-                return TokenCounter.count_tokens(text, model_for_tiktoken) # Added return here
+            return TokenCounter.count_tokens(text, model_for_tiktoken)
         else:
             # Use tiktoken for API-based models or as fallback
             model_for_tiktoken = self.model_name if self.model_name != "local-model" else "gemma-3-4b-it" # Fallback model
@@ -693,7 +581,7 @@ class LLMFactory:
 
         if provider.lower() == "openai":
             return OpenAILLM(config)
-        elif provider.lower() == "local": # Changed from lm_studio to local to match config.yaml api_type
+        elif provider.lower() == "local":
             return LMStudioLLM(config)
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
@@ -708,11 +596,9 @@ def get_default_llm() -> BaseLLM:
     """
     try:
         config = RadisConfig()
-        llm_config = config.get_llm_config() # Get the LLMConfig object for the active LLM
-        provider = llm_config.api_type  # Get the provider name (api_type)
-        
-        # Pass the dictionary representation of the active LLM's config
+        llm_config = config.get_llm_config()
+        provider = llm_config.api_type  # Use api_type from LLMConfig
         return LLMFactory.create(provider, llm_config.model_dump())
     except Exception as e:
-        logger.error(f"Error creating default LLM: {e}", exc_info=True) # Added exc_info
+        logger.error(f"Error creating default LLM: {e}")
         raise  # Don't fall back to OpenAI, let the error propagate

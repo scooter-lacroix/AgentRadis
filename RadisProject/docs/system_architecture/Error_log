@@ -1,0 +1,61 @@
+We're still not seeing the complete output with the model's response, even with the debug flag. Let's check if there's any error log that was generated during execution. The script seems to redirect errors to an error.log file.
+~/Dew/AgentRadis_v2_old/RadisProject claude 3.7 sonnet
+No errors are being generated, and when a prompt is entered, the lm server is not being engaged at all and Radis just returns the inserted prompt.R
+I understand the issue now. Let me clarify the task requirements to incorporate your feedback.
+./run.sh --config
+Ensuring dependencies are installed...
+Showing AgentRadis Configuration...
+{
+  "active_llm": "lm_studio",
+  "llm": {
+    "lm_studio": {
+      "api_type": "local",
+      "model": "gemma-3-4b-it",
+      "fallback_model": null,
+      "temperature": 0.7,
+      "max_tokens": 2000,
+      "api_key": "lm-studio",
+      "api_base": "http://localhost:1234/v1",
+      "base_url": null
+    }
+  },
+  "browser": {
+    "headless": true,
+    "executable_path": "/usr/bin/firefox"
+  },
+  "log_level": "info",
+  "current_llm_config": {
+    "api_type": "local",
+    "model": "gemma-3-4b-it",
+    "fallback_model": null,
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "api_key": "lm-studio",
+    "api_base": "http://localhost:1234/v1",
+    "base_url": null
+  }
+}
+Great! The LM Studio server is indeed running and the Gemma models are available, including the gemma-3-4b-it model that's specified in the configuration.
+
+Let me try to execute the script in flow mode since your feedback indicates that the regular mode isn't engaging with the LM server.
+./run.sh --flow "Tell me about yourself"
+Ensuring dependencies are installed...
+
+=====================================
+           Starting AgentRadis Flow
+=====================================
+
+Working on it, almost there...
+
++----------------------------------------------------------------------------------------------------+
+|+--------------------------------------------------------------------------------------------------+|
+||                                               RESULT                                               ||
+|+--------------------------------------------------------------------------------------------------+|
++----------------------------------------------------------------------------------------------------+
+|  Radis:                                                                                            |
++----------------------------------------------------------------------------------------------------+
+
+It seems that even with the --flow option, we're still not getting a complete response from the model. Let me try one more time with a different prompt, and also check if we can find any log files that might provide more information about what's happening behind the scenes.
+Let's check the most recent logs to see if there are any errors or clues about why the LM server isn't being engaged.
+The app.log file seems to be empty. Let's check the radis.log file for any recent activity.
+Now I understand the issue better. The logs show that the system is processing the queries but not actually engaging with the LM server. Let's check the source code to understand why this might be happening.

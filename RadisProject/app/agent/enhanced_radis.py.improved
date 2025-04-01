@@ -1,0 +1,305 @@
+from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass
+import asyncio
+import time
+import re
+import logging
+from app.logger import get_logger
+from app.schema.models import Message
+from app.schema.types import Role
+from app.memory import RollingWindowMemory
+from app.agent.base import BaseAgent
+from app.metrics import MetricsTracker
+from app.tool import BaseTool
+from app.core.exceptions import RadisBaseError, ToolExecutionError
+
+logger = get_logger(__name__)
+
+class ToolNotFoundError(RadisBaseError):
+    """Raised when a requested tool cannot be found."""
+    pass
+
+@dataclass
+class ToolMetrics:
+    total_calls: int = 0
+    successful_calls: int = 0
+    failed_calls: int = 0
+    total_execution_time: float = 0.0
+
+    def record_execution(self, success: bool, execution_time: float):
+        self.total_calls += 1
+        if success:
+            self.successful_calls += 1
+        else:
+            self.failed_calls += 1
+        self.total_execution_time += execution_time
+
+class EnhancedRadis(BaseAgent):
+    def __init__(
+        self,
+        memory: Optional[RollingWindowMemory] = None,
+        tools: Optional[List[BaseTool]] = None,
+        system_prompt: str = "",
+        metrics_tracker: Optional[MetricsTracker] = None,
+        model: str = "gpt-3.5-turbo",
+        temperature: float = 0.7,
+        api_base: Optional[str] = None,
+        planning_tool: Optional[Any] = None
+    ):
+        super().__init__(model=model, temperature=temperature)
+        self.memory = memory or RollingWindowMemory()
+        self.tools = tools or []
+        if planning_tool:
+            self.tools.append(planning_tool)
+        self.system_prompt = system_prompt
+        self.metrics_tracker = metrics_tracker
+        self.tool_metrics: Dict[str, ToolMetrics] = {}
+        self.api_base = api_base
+        
+        # Initialize metrics for each tool
+        for tool in self.tools:
+            self.tool_metrics[tool.name] = ToolMetrics()
+        
+        # Add system prompt to memory if provided
+        if system_prompt:
+            self.memory.add_message(Message(role=Role.SYSTEM, content=system_prompt))
+
+    async def async_setup(self) -> None:
+        """Set up the agent asynchronously.
+        
+        This method initializes tools and other necessary components.
+        """
+        self._is_configured = True
+        if self.metrics_tracker:
+            await self.metrics_tracker.initialize()
+            
+        # Initialize all tools
+        for tool in self.tools:
+            try:
+                await tool.initialize()
+            except Exception as e:
+                logger.error(f"Failed to initialize tool {tool.name}: {e}")
+
+    async def run(self, prompt: str, **kwargs) -> str:
+        """
+        Process the input prompt and handle any required tool executions.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional keyword arguments for processing
+            
+        Returns:
+            str: The processed response
+        """
+        try:
+            # Add user message to memory
+            self.memory.add_message(Message(role=Role.USER, content=prompt))
+            
+            # Process the prompt and detect if tools need to be used
+            response = await self._process_with_tools(prompt)
+            
+            # Add assistant response to memory
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=response))
+            
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error processing prompt: {str(e)}"
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=error_msg))
+            raise
+
+    async def step(self) -> bool:
+        """Execute a single step in the agent's processing.
+        
+        Returns:
+            True if more steps are needed, False if processing is complete
+        """
+        if not self.memory.messages:
+            return False
+            
+        # Get the last message
+        last_message = self.memory.messages[-1]
+        
+        # If the last message is from the user, we need to process it
+        if last_message.role == Role.USER:
+            response = await self._process_with_tools(last_message.content)
+            self.memory.add_message(Message(role=Role.ASSISTANT, content=response))
+            return True
+            
+        return False
+
+    async def _process_with_tools(self, prompt: str) -> str:
+        """
+        Internal method to process prompt and handle tool executions.
+        
+        Args:
+            prompt: The input prompt to process
+            
+        Returns:
+            str: The processed response with tool outputs incorporated
+        """
+        for tool in self.tools:
+            if tool.should_run(prompt):
+                start_time = time.time()
+                success = False
+                
+                try:
+                    result = await tool.run(prompt)
+                    success = True
+                    
+                    # Record tool execution in memory
+                    self.memory.add_message(
+                        Message(
+                            role=Role.TOOL,
+                            content=str(result),
+                            tool_name=tool.name
+                        )
+                    )
+                    
+                    return result
+                    
+                except ToolExecutionError as e:
+                    # Log tool failure and continue
+                    if self.metrics_tracker:
+                        self.metrics_tracker.record_error(str(e))
+                    return f"Tool execution failed: {str(e)}"
+                    
+                finally:
+                    execution_time = time.time() - start_time
+                    self.tool_metrics[tool.name].record_execution(
+                        success=success,
+                        execution_time=execution_time
+                    )
+        
+        # If no tools were executed, return the prompt as is
+        return prompt
+
+    async def reset(self) -> None:
+        """
+        Reset the agent's state, including memory and metrics.
+        """
+        # Clear memory while preserving system prompt
+        system_prompt = None
+        for msg in self.memory.messages:
+            if msg.role == Role.SYSTEM:
+                system_prompt = msg.content
+                break
+                
+        self.memory.clear()
+        
+        if system_prompt:
+            self.memory.add_message(Message(role=Role.SYSTEM, content=system_prompt))
+        
+        # Reset tool metrics
+        for tool_name in self.tool_metrics:
+            self.tool_metrics[tool_name] = ToolMetrics()
+            
+        # Reset tools
+        for tool in self.tools:
+            asyncio.create_task(tool.cleanup())
+
+    async def cleanup(self) -> None:
+        """
+        Cleanup resources used by the agent.
+        """
+        if self.memory:
+            self.memory.clear()
+            
+        for tool in self.tools:
+            await tool.cleanup()
+            
+    def get_tool_metrics(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get metrics for all tools.
+        
+        Returns:
+            Dict containing metrics for each tool
+        """
+        return {
+            name: {
+                "total_calls": metrics.total_calls,
+                "successful_calls": metrics.successful_calls,
+                "failed_calls": metrics.failed_calls,
+                "total_execution_time": metrics.total_execution_time,
+                "average_execution_time": (
+                    metrics.total_execution_time / metrics.total_calls 
+                    if metrics.total_calls > 0 else 0
+                )
+            }
+            for name, metrics in self.tool_metrics.items()
+        }
+
+    def get_tools(self) -> List[BaseTool]:
+        """Get the list of tools available to the agent.
+
+        Returns:
+            List[BaseTool]: The list of tools currently configured for this agent
+        """
+        return self.tools
+        
+    def get_tool(self, tool_name: str, case_sensitive: bool = True, fuzzy_match: bool = False) -> Optional[BaseTool]:
+        """Get a specific tool by name with enhanced error handling and matching options.
+        
+        This method finds a tool by its name with options for case-insensitive lookup
+        and fuzzy matching for convenience and robustness in tool retrieval.
+        
+        Args:
+            tool_name: The name of the tool to find
+            case_sensitive: Whether the name matching should be case-sensitive
+            fuzzy_match: If True, will try to find tools that partially match the name
+            
+        Returns:
+            BaseTool: The matched tool if found, None otherwise
+            
+        Raises:
+            ToolNotFoundError: If fuzzy_match is True, specific error occurs, and
+                             no matching tool is found (includes suggestions)
+            ValueError: If tool_name is not a valid string or is empty
+        """
+        # Input validation
+        if not tool_name:
+            raise ValueError("Tool name cannot be empty")
+            
+        if not isinstance(tool_name, str):
+            raise ValueError(f"Tool name must be a string, got {type(tool_name)}")
+        
+        # Case-insensitive preparations  
+        search_name = tool_name if case_sensitive else tool_name.lower()
+        
+        # Direct match first
+        for tool in self.tools:
+            tool_identifier = tool.name if case_sensitive else tool.name.lower()
+            if tool_identifier == search_name:
+                return tool
+                
+        # If no direct match and fuzzy matching is enabled
+        if fuzzy_match:
+            closest_matches = []
+            for tool in self.tools:
+                tool_identifier = tool.name if case_sensitive else tool.name.lower()
+                # Check for substring match
+                if search_name in tool_identifier or tool_identifier in search_name:
+                    closest_matches.append(tool)
+                    
+            # If we found exactly one match
+            if len(closest_matches) == 1:
+                logger.info(f"Fuzzy matched '{tool_name}' to '{closest_matches[0].name}'")
+                return closest_matches[0]
+                
+            # If multiple potential matches, log them but return None
+            elif len(closest_matches) > 1:
+                match_names = [t.name for t in closest_matches]
+                suggestions = ", ".join(match_names)
+                raise ToolNotFoundError(
+                    f"Multiple tools match '{tool_name}'. Did you mean one of: {suggestions}?"
+                )
+            
+            # If no matches at all
+            else:
+                available_tools = ", ".join([t.name for t in self.tools])
+                raise ToolNotFoundError(
+                    f"No tool matches '{tool_name}'. Available tools: {available_tools}"
+                )
+                
+        # No match and no fuzzy matching
+        return None
