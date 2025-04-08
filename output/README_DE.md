@@ -610,7 +610,7 @@ Beispiel:
 ## 👨‍💻 Autor
 
 **Stanley Chisango** (@scooter-lacroix)
-- 📧 E-Mail: theslick.stan@gmail.com
+- 📧 E-Mail: scooterlacroix@gmail.com
 - 🌐 GitHub: [scooter-lacroix](https://github.com/scooter-lacroix)
 
 ## 📄 Lizenz
