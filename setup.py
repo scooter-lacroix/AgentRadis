@@ -8,11 +8,11 @@ setup(
     name="agentradis",
     version="0.2.0",
     author="AgentRadis Team",
-    author_email="",
+    author_email="scooterlacroix@gmail.com",
     description="A flexible AI agent system with tool integration",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/agentradis/AgentRadis",
+    url="https://github.com/scooter-lacroix/AgentRadis/",
     packages=find_packages(),
     install_requires=[
         "pydantic~=2.10.4",
