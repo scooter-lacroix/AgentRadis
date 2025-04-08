@@ -1,6 +1,6 @@
 <html>
 <head>
-    <title>OpenManus Interface</title>
+    <title>Radis Interface</title>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
@@ -58,11 +58,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>OpenManus Interface</h1>
+        <h1>Radis Interface</h1>
         
         <!-- Connection Panel -->
         <div id="connection-panel">
-            <input type="text" id="connection-input" placeholder="Enter OpenManus host URL" value="http://localhost:5000" />
+            <input type="text" id="connection-input" placeholder="Enter Radis host URL" value="http://localhost:5000" />
             <button id="connect-btn" class="btn btn-primary">Connect</button>
             <div id="status-indicator" class="disconnected">Disconnected</div>
         </div>
@@ -141,7 +141,7 @@
                 fetchTools();
                 
                 // Add welcome message
-                displaySystemMessage("Connected to OpenManus. Type a query or command to get started.");
+                displaySystemMessage("Connected to Radis. Type a query or command to get started.");
             } catch (error) {
                 showError(`Connection failed: ${error.message}`);
                 updateConnectionStatus('disconnected');
@@ -217,7 +217,7 @@
         // Chat Functions
         async function sendMessage() {
             if (!state.connected) {
-                showError("Please connect to OpenManus first");
+                showError("Please connect to Radis first");
                 return;
             }
             
@@ -362,7 +362,7 @@
             thinkingDiv.id = 'thinking-indicator';
             thinkingDiv.className = 'thinking-indicator';
             thinkingDiv.innerHTML = `
-                <span>OpenManus is thinking</span>
+                <span>Radis is thinking</span>
                 <div class="thinking-dots">
                     <div class="thinking-dot"></div>
                     <div class="thinking-dot"></div>
@@ -422,7 +422,7 @@
             // Format the message with proper code highlighting
             const formattedText = formatMessage(text);
             
-            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'OpenManus'}:</strong> ${formattedText}`;
+            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Radis'}:</strong> ${formattedText}`;
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -522,7 +522,7 @@
             sendButton.setAttribute('disabled', 'disabled');
             
             // Display welcome message
-            displaySystemMessage("Welcome to OpenManus Interface. Please connect to a server to begin.");
+            displaySystemMessage("Welcome to the Radis Interface. Please connect to a server to begin.");
         });
     </script>
 </html>
